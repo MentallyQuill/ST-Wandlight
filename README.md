@@ -39,6 +39,14 @@ The opener's prose style sets the tone for everything that follows.
 
 <div align="center"><img src="Images/divider.jpg" width="800"></div>
 
+### 4. (Optional) Add Canon Lore Anchoring
+
+Into your Author's Note at Depth 1 as System add similar to the following: *It is January of their 6th-Year, align lore, secrets, knowledge, and events accdordingly.*
+
+If additional blacklisting is needed, try adding: *The characters are net yet aware of X, Y, or Z.*
+
+This is a low-cost, if ineligant solution.
+
 ## Features
 
 ### Toggleable Modules
