@@ -1,6 +1,6 @@
 # Wandlight
 
-Wandlight is a lightweight SillyTavern prompt preset for Harry Potter roleplay. It addresses the shortcoming of generic-setting presents with a direct and tailored approach, while being a fraction of the tokens. It ships with built-in togglable definitions for the Golden Trio — each with distinct voice, personality, and behavioural patterns enforced at prompt level.
+Wandlight is a lightweight SillyTavern prompt preset for Harry Potter roleplay. It addresses shortcomings of generic-setting presents with a direct and tailored approach, while being a fraction of the token cost. It ships with built-in togglable definitions for the Golden Trio — each with distinct voice, personality, and behavioural patterns enforced at prompt level.
 
 ## Getting Started
 
