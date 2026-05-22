@@ -64,11 +64,11 @@ Length modules set a `{{setvar}}` variable that the Formatting prompt reads via 
 
 Three toggleable identity modules. Enable what the scene calls for. Each character gets voice, physical tells, and behavioral patterns — the Trio in detail, everyone else in confident strokes.
 
-**🪄 Character Identities** (ON by default) — Hermione, Harry, Ron. Full profiles.
+**Golden Trio** (ON by default) — Hermione, Harry, Ron. Full profiles.
 
-**🪄 Supporting Cast** (OFF) — Snape, Draco, Neville, Luna, Ginny, Fred & George, McGonagall, Lupin. Toggle on when they appear.
+**Supporting Cast** (OFF) — Snape, Draco, Neville, Luna, Ginny, Fred & George, McGonagall, Lupin. Toggle on when they appear.
 
-**🪄 Villains** (OFF) — Voldemort, Bellatrix, Umbridge, Lucius Malfoy, Pettigrew. For when the story darkens.
+**Villains** (OFF) — Voldemort, Bellatrix, Umbridge, Lucius Malfoy, Pettigrew. For when the story darkens.
 
 ### HP Anti-Slop Logit Bias
 
