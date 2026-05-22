@@ -1,4 +1,4 @@
-<img src="wandlight-banner.png" width="800">
+<img src="Images/wandlight-banner.jpg" width="800">
 
 # Wandlight
 
@@ -32,11 +32,13 @@ Pick an opener from `Openers/` and paste it into the card's **First Message** fi
 
 The opener's prose style sets the tone for everything that follows.
 
----
+<img src="Images/divider.jpg" width="800">
 
 ## Features
 
 ### Toggleable Modules
+
+<img src="Images/toggle-modules.jpg" width="600">
 
 Enable or disable modules in SillyTavern's Prompt Manager. Only one Length module should be active at a time.
 
@@ -49,8 +51,9 @@ Enable or disable modules in SillyTavern's Prompt Manager. Only one Length modul
 | **Length: Short** | OFF | 3–5 paragraphs. |
 | **Length: Medium** | OFF | 5–10 paragraphs. |
 | **Length: Long** | OFF | 12+ paragraphs. Chapter-length. |
-| **Supporting Cast** | OFF | Voice definitions for Snape, Draco, Neville, Luna, Ginny, Fred & George, McGonagall, Lupin. |
-| **Villains** | OFF | Voice definitions for Voldemort, Bellatrix, Umbridge, Lucius Malfoy, Pettigrew. |
+| **Golden Trio** | ON | Definitions for Harry, Ron, Hermione. |
+| **Supporting Cast** | OFF | Definitions for Snape, Draco, Neville, Luna, Ginny, Fred & George, McGonagall, Lupin. |
+| **Villains** | OFF | Definitions for Voldemort, Bellatrix, Umbridge, Lucius Malfoy, Pettigrew. |
 
 ### Prose Enforcement
 
@@ -60,21 +63,35 @@ All anti-slop rules — banned constructions, banned clichés, Fresh Ink Only, V
 
 Length modules set a `{{setvar}}` variable that the Formatting prompt reads via `{{getvar}}`. Changing length is a single toggle, not a prompt edit.
 
+<img src="Images/divider.jpg" width="800">
+
 ### Character Sets
 
 Three toggleable identity modules. Enable what the scene calls for. Each character gets voice, physical tells, and behavioral patterns — the Trio in detail, everyone else in confident strokes.
 
-**Golden Trio** (ON by default) — Hermione, Harry, Ron. Full profiles.
+<img src="Images/charset-trio.jpg" width="600">
+
+**Golden Trio** (ON by default) — Hermione, Harry, Ron. Canon core.
+
+<img src="Images/charset-supporting.jpg" width="600">
 
 **Supporting Cast** (OFF) — Snape, Draco, Neville, Luna, Ginny, Fred & George, McGonagall, Lupin. Toggle on when they appear.
 
+<img src="Images/charset-villains.jpg" width="600">
+
 **Villains** (OFF) — Voldemort, Bellatrix, Umbridge, Lucius Malfoy, Pettigrew. For when the story darkens.
 
-### HP Anti-Slop Logit Bias
+<img src="Images/divider.jpg" width="800">
 
-A curated ~200-entry logit bias targeting universal AI slop, HP/fantasy clichés, and lazy magical descriptors, with gentle positive bias toward dialogue punctuation. Select **"HP Anti-Slop"** from the Logit Bias dropdown in AI Response Configuration.
+### The Scrivener's Ward
+
+<img src="Images/scriveners-antislop.jpg" width="600">
+
+A curated ~200-entry logit bias targeting universal AI slop, HP/fantasy clichés, and lazy magical descriptors, with gentle positive bias toward dialogue punctuation. Select **"Scrivener's Ward"** from the Logit Bias dropdown in AI Response Configuration.
 
 ### Dynamic Canon
+
+<img src="Images/dynamic-canon.jpg" width="600">
 
 Characters know only what they could know by the date in the timestamp. When the chat history contradicts canon, the chat history is operative truth.
 
