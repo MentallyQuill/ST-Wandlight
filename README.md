@@ -2,6 +2,67 @@
 
 Wandlight is a universal SillyTavern prompt preset for Harry Potter roleplay. It addresses the shortcoming of generic-setting presents with a direct and tailored approach. It ships with built-in togglable definitions for the Golden Trio — each with distinct voice, personality, and behavioural patterns enforced at prompt level.
 
+## Getting Started
+
+Follow these steps to set up Wandlight and start writing your story.
+
+### Step 1: Setup
+
+#### 1a. Import the Wandlight Preset
+
+1. Download `Presets/Wandlight-1.0.json` from this repository.
+2. In SillyTavern, open the **Presets** panel (found in the AI Response Configuration area).
+3. Click **Import** and select the downloaded `Wandlight-X.X.json` file.
+4. Make sure Wandlight is selected as your active preset before continuing.
+
+The Wandlight preset contains all the system-level instructions that tell the AI *how* to write — prose style, narrative perspective, character autonomy, formatting rules, and more. It's the engine that drives the entire experience.
+
+#### 1b. Choose a Compatible Model
+
+Wandlight is model-agnostic, but results vary significantly depending on which model you use. For the best experience, we recommend:
+
+| Model | Quality | Notes |
+|---|---|---|
+| **Claude Opus 4.7** | ★★★★★ | Most tested. Excellent prose, strong character voicing, best adherence to the prompt's literary instructions. Expensive as hell. |
+| **GLM-5.1** | ★★★★☆ | Great results. Handles narrative mode well and produces vivid prose. Very affordable. |
+| **DeepSeek-4** | ★★★☆☆ | Good. Creative, with strong writing capabilities, but sometimes loses details or strays from the plot. Incredibly cheap. |
+
+#### 1c. Create a "Story" Character Card
+
+This is the most tested method:
+
+1. In SillyTavern, create a **new character card**.
+2. Name it something general like **"Story"** (or "Narrator", "Hogwarts", "The World", etc. — whatever fits your setting).
+3. Leave the character's description, personality, and scenario fields **empty**.
+
+### Step 2: Set Your Opening Scene
+
+The first message of your Story card is important — it establishes the prose style, tone, pacing, and narrative voice that the AI will follow for the entire story.
+
+#### Option A: Use a Starter from This Repository
+
+The `Starters/` folder contains pre-written opening scenes crafted in the prose style Wandlight is designed to produce. These are ready to use:
+
+1. Browse the [Starters](Starters/) folder for a starter that appeals to you.
+2. Copy the full text of the starter.
+3. In your Story character card, paste it into the **First Message** field.
+
+#### Option B: Write Your Own Starter
+
+You can also write your own opening, but the prose style matters enormously.
+
+**Or use a leading litary model to write your starter.**
+
+*Create a SillyTavern story opener in the prose style of Harry Potter: It's late January of their 6th year, a cold winter morning. Hermione is quietly studying in the library. Set the scene with detail and Hermione's state of mind. (3rd person limited)*
+
+> Do not write your starter in casual, chat-like, or roleplay-heavy prose unless that's the style you want the entire story written in.
+
+### Step 3: Begin!
+
+Once your preset is loaded and your first message is set, you're ready to write.
+
+# Wandlight Features
+
 ### Dynamic Canon
 
 Two rules govern all characters regardless of which identities are active:
@@ -11,29 +72,17 @@ Two rules govern all characters regardless of which identities are active:
 
 ---
 
-## World Fidelity
+#### World Fidelity
 
-### Fog of Hogwarts - Characters act only on information they could realistically possess.
+#### Fog of Hogwarts - Characters act only on information they could realistically possess.
 
-### Quill and Parchment Standard - Reduced Slop
+#### Quill Standard - Reduced Slop
 
-### Fresh Ink Only - Anti-Repeating
+#### Fresh Ink Only - Anti-Repeating
 
-### Unpredictable Chapters - Matches writing structure to scene energy.
+#### Dynamic Pacing - Matches writing structure to scene energy.
 
-### Committed Action - Less deciding to act, more acting.
-
----
-
-## Character Driver
-
-The behavioural engine that prevents characters from becoming passive surfaces.
-
-- **Agency**: Characters are Drivers, not Passengers. Circling conversations are broken by initiative.
-- **Priority Override**: Characters redirect when conversation drifts past relevance.
-- **Emotional Inertia**: Growth is gradual.
-- **Temporal Anchoring**: Real-time pacing. No fast travel. Walk the corridors. Let the journey accumulate.
-- **Vocabulary Guard**: Classic British Fantasy register that curbs models' technical and tactical language.
+#### Character Driver - Less deciding to act, more acting.
 
 ---
 
@@ -47,30 +96,4 @@ This not only grounds the scene, but is useful for tracking pacing and key momen
 
 ---
 
-## Injection Architecture
-
-| Depth | Position | Content |
-|-------|----------|---------|
-| 4 | 0 (system) | Main System, World Info, Description, Personality, Scenario, Chat History, Examples |
-| 3 | 0 (system) | World Fidelity, Human Truths |
-| 1 | 1 (system/user) | Timestamp, Character Identities, Formatting, Character Driver |
-
-Depth 4 establishes the world. Depth 3 enforces the rules. Depth 1 ensures character identity and behaviour are the last things the model processes.
-
----
-
-## Installation
-
-1. Download `Wandlight-1.0.json` from the `Presets` folder.
-2. In SillyTavern, open Settings > Presets. Click Import and select the file.
-3. Enable the prompt blocks you need. At minimum: Main System, Character Identities (or your replacement), World Fidelity, Human Truths, Character Driver, Formatting, and Timestamp.
-
-Character Identities can be toggled off. Replace them with your own persona via character card or World Info. The writing rules apply regardless.
-
----
-
-## From Hermione to Wandlight
-
-This preset began as Hermione 1.0 — a single-character prompt for writing Hermione Granger. It grew through twenty-one iterations, most of which were prompted by reading output that was wrong in some specific, nameable way and writing a rule to fix it.
-
-Wandlight 1.0 is the universal version: character definitions expanded to include Harry and Ron, writing rules made character-agnostic, timestamp system extracted, injection architecture reorganised. The principles haven't changed. Bad prose is still bad prose. Hovering is still hovering. And "a breath she didn't know she was holding" remains prohibited.
+Enjoy!
