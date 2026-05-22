@@ -8,7 +8,10 @@ A featherweight preset for SillyTavern HP roleplay & fanfiction.
 
 ### 1. Import the Preset
 
-Download `Presets/Wandlight-1.1.json` and import it via SillyTavern's **Presets** panel (in AI Response Configuration). Select Wandlight as your active preset.
+Download `Presets/Wandlight-1.1.json` and import it via SillyTavern's **Presets** panel. Select Wandlight as your active preset.
+
+> By default, Wandlight's reasoning effort is set to Low, for quick responses. If you're using a reasoning model, experiment with higher reasoning during more complex moments, or multi-character scenes.
+
 
 ### 2. Pick a Model
 
