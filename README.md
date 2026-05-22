@@ -4,7 +4,9 @@
 
 A featherweight preset for SillyTavern HP roleplay & fanfiction.
 
-## Quick Start
+## Getting Started
+
+<img src="Images/getting-started.jpg" width="800">
 
 ### 1. Import the Preset
 
@@ -23,6 +25,8 @@ Wandlight is model-agnostic, though prose quality varies:
 ### 3. Create a Story Card
 
 Make a new character card — call it "Story," "Narrator," or "Hogwarts." Leave description, personality, and scenario **empty**.
+
+> *Compatible with Character Cards, but designed for lightweight use without.*
 
 ### 4. Set Your Opening Scene
 
