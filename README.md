@@ -41,7 +41,7 @@ The opener's prose style sets the tone for everything that follows.
 
 ### 5. (Optional) Add Canon Lore Anchoring
 
-Into your Author's Note at Depth 1 as System add similar to the following: *It is January of their 6th-Year, align lore, secrets, knowledge, relationships, and events accdordingly.*
+Into your Author's Note or a constant-triggered Lorebook at Depth 1 as System add similar to the following: *It is January of their 6th-Year, align lore, secrets, knowledge, relationships, and events accdordingly.*
 
 If additional blacklisting is needed, try adding: *The characters are not yet aware of X, Y, or Z.*
 
