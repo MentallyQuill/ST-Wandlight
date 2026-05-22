@@ -39,13 +39,13 @@ The opener's prose style sets the tone for everything that follows.
 
 <div align="center"><img src="Images/divider.jpg" width="800"></div>
 
-### 4. (Optional) Add Canon Lore Anchoring
+### 5. (Optional) Add Canon Lore Anchoring
 
 Into your Author's Note at Depth 1 as System add similar to the following: *It is January of their 6th-Year, align lore, secrets, knowledge, relationships, and events accdordingly.*
 
 If additional blacklisting is needed, try adding: *The characters are not yet aware of X, Y, or Z.*
 
-This is a low-cost, if ineligant solution.
+This is a low-cost and effective, if ineligant solution.
 
 ## Features
 
@@ -106,7 +106,7 @@ A curated ~200-entry logit bias targeting universal AI slop, HP/fantasy clichés
 
 <div align="center"><img src="Images/dynamic-canon.jpg" width="600"></div>
 
-Characters know only what they could know by the date in the timestamp. When the chat history contradicts canon, the chat history is operative truth.
+In combination with manual Lore Anchoring (via Author's Note, Lorebooks), reduces out-of-order and omnicient knowledge based on the date in the timestamp. When the chat history contradicts canon, the chat history is operative truth. Stronger reasoning models recommended for most effective canon adherence.
 
 ### Fog of Hogwarts
 
