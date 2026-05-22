@@ -344,7 +344,7 @@
     "show_thoughts": true,
     "auto_append_reasoning_tags": false,
     "auto_append_reasoning_tag_style": "think",
-    "reasoning_effort": "low",
+    "reasoning_effort": "medium",
     "verbosity": "low",
     "enable_web_search": false,
     "request_images": false,
