@@ -16,7 +16,7 @@ Wandlight is model-agnostic, though prose quality varies:
 
 | Model | Quality | Notes |
 |---|---|---|
-| **Claude Opus 4.7** | ★★★★★ | Most tested. Best prose and character voicing. Expensive as Galleons. |
+| **Claude Opus 4.6/7** | ★★★★★ | Most tested. Best prose and character voicing. Expensive as Galleons. |
 | **GLM-5.1** | ★★★★☆ | Vivid prose, handles narrative mode well. Very affordable. |
 | **DeepSeek-4** | ★★★☆☆ | Creative but can stray. Incredibly cheap. |
 
@@ -104,8 +104,4 @@ Less deciding to act, more acting. Characters pursue their own goals in real tim
 
 ---
 
-## Openers
-
-The `Openers/` folder contains pre-written opening scenes ready to paste into a Story card:
-
-- **Hermione** — library study, a Dementor encounter, a counselor meeting, a mysterious discovery, and a winter survival scene
+Enjoy!
