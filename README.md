@@ -53,7 +53,7 @@ You can also write your own opening, but the prose style matters enormously.
 
 **Or use a leading litary model to write your starter.**
 
-*Create a SillyTavern story opener in the prose style of Harry Potter: It's late January of their 6th year, a cold winter morning. Hermione is quietly studying in the library. Set the scene with detail and Hermione's state of mind. (3rd person limited)*
+Prompt: *Create a SillyTavern story opener in the prose style of Harry Potter: It's late January of their 6th year, a cold winter morning. Hermione is quietly studying in the library. Set the scene with detail and Hermione's state of mind. (3rd person limited)*
 
 > Do not write your starter in casual, chat-like, or roleplay-heavy prose unless that's the style you want the entire story written in.
 
@@ -65,28 +65,29 @@ Once your preset is loaded and your first message is set, you're ready to write.
 
 ### Dynamic Canon
 
-Two rules govern all characters regardless of which identities are active:
-
-- **Date Check**: Characters know only what they could realistically know by the date in the timestamp. No hindsight, no offscreen knowledge.
+- **Date Check**: Characters know only what they could know by the date in the timestamp.
 - **Context Override**: If the chat history contradicts canon, the chat history is the operative truth.
 
 ---
 
-#### World Fidelity
+#### Fog of Hogwarts 
+Characters act only on information they could realistically possess.
 
-#### Fog of Hogwarts - Characters act only on information they could realistically possess.
+#### Quill Standard
+Reduced Slop.
 
-#### Quill Standard - Reduced Slop
+#### Fresh Ink Only 
+Anti-Repeating.
 
-#### Fresh Ink Only - Anti-Repeating
+#### Dynamic Pacing
+Matches writing structure to scene energy.
 
-#### Dynamic Pacing - Matches writing structure to scene energy.
-
-#### Character Driver - Less deciding to act, more acting.
+#### Character Driver
+Less deciding to act, more acting.
 
 ---
 
-## Timestamp
+### Timestamp
 
 Every response opens with date, time, location, and weather:
 
