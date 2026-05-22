@@ -12,7 +12,7 @@ Download `Presets/Wandlight-1.x.json` and import it via SillyTavern's **Presets*
 
 > Reasoning effort is set to Low by default, for quick, token-light responses. If you're using a reasoning model, experiment with higher reasoning during more complex moments, multi-character scenes, or for better lore-accuracy and recall.
 
-<div align="left"><img src="Images/toggle-modules.jpg" width="400"></div>
+<div align="left"><img src="Images/reasoning-effort.jpg" width="400"></div>
 
 
 ### 2. Pick a Model
