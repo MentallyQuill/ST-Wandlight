@@ -20,8 +20,8 @@ Wandlight is model-agnostic, though prose quality varies:
 | Model | Quality | Notes |
 |---|---|---|
 | **Claude Opus 4.6/7** | ★★★★★ | Most tested. Best prose and character voicing. Expensive as Galleons. |
-| **GLM-5.1** | ★★★★☆ | Vivid prose, handles narrative mode well. Very affordable. |
-| **DeepSeek-4** | ★★★☆☆ | Creative but can stray. Incredibly cheap. |
+| **GLM-5.1** | ★★★★☆ | Vivid prose, handles narrative mode well. Some lore slip. Very affordable. |
+| **DeepSeek-4** | ★★★☆☆ | Creative but can stray. More lore slip. Incredibly cheap. |
 
 ### 3. Create a Story Card
 
