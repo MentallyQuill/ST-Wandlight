@@ -39,23 +39,23 @@ This is the most tested method:
 
 The first message of your Story card is important — it establishes the prose style, tone, pacing, and narrative voice that the AI will follow for the entire story.
 
-#### Option A: Use a Starter from This Repository
+#### Option A: Use a Opener from This Repository
 
-The `Starters/` folder contains pre-written opening scenes crafted in the prose style Wandlight is designed to produce. These are ready to use:
+The `Openers/` folder contains pre-written opening scenes crafted in the prose style Wandlight is designed to produce. These are ready to use:
 
-1. Browse the [Starters](Starters/) folder for a starter that appeals to you.
-2. Copy the full text of the starter.
+1. Browse the [Openers](Openers/) folder for a Opener that appeals to you.
+2. Copy the full text of the Opener.
 3. In your Story character card, paste it into the **First Message** field.
 
-#### Option B: Write Your Own Starter
+#### Option B: Write Your Own Opener
 
 You can also write your own opening, but the prose style matters enormously.
 
-**Or use a leading litary model to write your starter.**
+**Or use a leading litary model to write your opener.**
 
 Prompt: *Create a SillyTavern story opener in the prose style of Harry Potter: It's late January of their 6th year, a cold winter morning. Hermione is quietly studying in the library. Set the scene with detail and Hermione's state of mind. (3rd person limited)*
 
-> Do not write your starter in casual, chat-like, or roleplay-heavy prose unless that's the style you want the entire story written in.
+> Do not write your opener in casual, chat-like, or roleplay-heavy prose unless that's the style you want the entire story written in.
 
 ### Step 3: Begin!
 
