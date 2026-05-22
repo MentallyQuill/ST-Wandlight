@@ -49,7 +49,7 @@ Enable or disable modules in SillyTavern's Prompt Manager. Only one Length modul
 
 | Module | Default | What It Does |
 |---|---|---|
-| **Timestamp** | ON | Opens each response with date, time, location, and weather. |
+| **Timestamp** | ON | Opens each response with date, time, location, and weather. > Key for knowledge tracking features. |
 | **Journey Integrity** | OFF | Real-time pacing. No fast-travelling through the castle. |
 | **Realism Mode** | OFF | Social friction. Skepticism, self-interest, guardedness. Vulnerability costs something. |
 | **Length: Flexible** | ON | Matches length to scene energy — quiet moments are brief, dramatic ones expand. |
