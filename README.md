@@ -49,6 +49,8 @@ Enable or disable modules in SillyTavern's Prompt Manager. Only one Length modul
 | **Length: Short** | OFF | 3–5 paragraphs. |
 | **Length: Medium** | OFF | 5–10 paragraphs. |
 | **Length: Long** | OFF | 12+ paragraphs. Chapter-length. |
+| **Supporting Cast** | OFF | Voice definitions for Snape, Draco, Neville, Luna, Ginny, Fred & George, McGonagall, Lupin. |
+| **Villains** | OFF | Voice definitions for Voldemort, Bellatrix, Umbridge, Lucius Malfoy, Pettigrew. |
 
 ### Prose Enforcement
 
@@ -58,9 +60,15 @@ All anti-slop rules — banned constructions, banned clichés, Fresh Ink Only, V
 
 Length modules set a `{{setvar}}` variable that the Formatting prompt reads via `{{getvar}}`. Changing length is a single toggle, not a prompt edit.
 
-### Golden Trio Character Identities
+### Character Sets
 
-Built-in definitions for Hermione, Harry, and Ron — each with distinct voice, personality, physical tells, and behavioral patterns enforced at prompt level. Toggle them on or off, or replace with your own.
+Three toggleable identity modules. Enable what the scene calls for. Each character gets voice, physical tells, and behavioral patterns — the Trio in detail, everyone else in confident strokes.
+
+**🪄 Character Identities** (ON by default) — Hermione, Harry, Ron. Full profiles.
+
+**🪄 Supporting Cast** (OFF) — Snape, Draco, Neville, Luna, Ginny, Fred & George, McGonagall, Lupin. Toggle on when they appear.
+
+**🪄 Villains** (OFF) — Voldemort, Bellatrix, Umbridge, Lucius Malfoy, Pettigrew. For when the story darkens.
 
 ### HP Anti-Slop Logit Bias
 
