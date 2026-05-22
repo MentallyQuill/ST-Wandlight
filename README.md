@@ -6,8 +6,6 @@ A featherweight preset for SillyTavern HP roleplay & fanfiction.
 
 ## Getting Started
 
-<img src="Images/getting-started.jpg" width="800">
-
 ### 1. Import the Preset
 
 Download `Presets/Wandlight-1.1.json` and import it via SillyTavern's **Presets** panel (in AI Response Configuration). Select Wandlight as your active preset.
