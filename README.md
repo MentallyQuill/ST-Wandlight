@@ -55,7 +55,7 @@ This is a low-cost and effective, if ineligant solution.
 
 <div align="center"><img src="Images/toggle-modules.jpg" width="600"></div>
 
-Enable or disable modules in SillyTavern's Prompt Manager. Only one Length module should be active at a time.
+Enable or disable modules in SillyTavern's Prompt Manager. Only one module per group (Length, Tense, Perspective) should be active at a time.
 
 | Module | Default | What It Does |
 |---|---|---|
@@ -66,6 +66,12 @@ Enable or disable modules in SillyTavern's Prompt Manager. Only one Length modul
 | **Length: Short** | OFF | 3–5 paragraphs. |
 | **Length: Medium** | OFF | 5–10 paragraphs. |
 | **Length: Long** | OFF | 12+ paragraphs. Chapter-length. |
+| **Tense: Past** | ON | Narrates in past tense. |
+| **Tense: Present** | OFF | Narrates in present tense. |
+| **POV: 3rd Limited — Character** | ON | Narration anchored to the main character. Your character seen from the outside only. |
+| **POV: 3rd Limited — User** | OFF | Narration anchored to your character. The main character seen from the outside only. |
+| **POV: 3rd Omniscient** | OFF | Full access to any character's interiority. |
+| **POV: 1st Person** | OFF | Narrates as your character using "I." |
 | **Golden Trio** | ON | Definitions for Harry, Ron, Hermione. |
 | **Supporting Cast** | OFF | Definitions for Snape, Draco, Neville, Luna, Ginny, Fred & George, McGonagall, Lupin. |
 | **Villains** | OFF | Definitions for Voldemort, Bellatrix, Umbridge, Lucius Malfoy, Pettigrew. |
@@ -76,7 +82,7 @@ All anti-slop rules — banned constructions, banned clichés, Fresh Ink Only, V
 
 ### Variable-Based Formatting
 
-Length modules set a `{{setvar}}` variable that the Formatting prompt reads via `{{getvar}}`. Changing length is a single toggle, not a prompt edit.
+Length, Tense, and Perspective modules each set a `{{setvar}}` variable that the Formatting prompt reads via `{{getvar}}`. Switching tense, perspective, or length is a single toggle — no prompt editing required.
 
 <div align="center"><img src="Images/divider.jpg" width="800"></div>
 

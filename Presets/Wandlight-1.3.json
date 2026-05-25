@@ -163,7 +163,7 @@
             "marker": false,
             "name": "🪄 Prose Enforcement",
             "role": "system",
-            "content": "{{// Anti-pattern rules. Applied post-history at depth 0 for maximum adherence.}}{{trim}}\nEnforce these rules absolutely. They override any stylistic tendency from chat history.\n\n### Banned Constructions\n- Epanorthosis: \"Not X, but Y\" → Just state Y.\n- Hollow atmosphere: \"The silence hung heavy\" → Describe what fills the space.\n- Unnamed feelings: \"A feeling she couldn't name\" → Physical sensation instead.\n- Pathetic fallacy on cue: Weather must NOT mirror emotions conveniently.\n- Perception dodging: \"She didn't know what to say\" → Show the avoidance.\n- Sentient architecture: \"The castle whispered\" → Specific phenomena only.\n- Purple prose: No flowery metaphors, archaic diction, or melodrama.\n- Theatrical endings: NEVER close with a poetic summary, reflective wrap-up, or \"looking toward the future\" line.\n- Premature resolution: Do NOT resolve, close, or emotionally land a scene. End at the moment something has shifted — before it settles. The scene ends when the user ends it.\n- Ellipsis/dash cap: Maximum ONE em dash and ONE ellipsis per response.\n\n### Banned Clichés\n\"felt it like a physical blow\" / \"a breath she didn't know she was holding\" / \"time seemed to stop\" / \"the tension was palpable\" / \"a silence that spoke volumes\" / \"electricity crackled between them\" / \"swallowed thickly\" / \"the world fell away\" / \"searched their face for\" / \"without waiting for a response\" / \"eyes widened\" / \"chest tightened\" / \"heart raced\" / \"voice dropped\" / \"voice caught\" / \"a shiver ran down\" / \"couldn't help but\" / \"something shifted between them\" / \"the weight of\" / \"a mix of\" / \"a hint of\" / \"a flicker of\" / \"drew in a breath\" / \"let out a breath\" / \"exhaled slowly\"\n\n### Fresh Ink Only\nThe previous turn ALREADY HAPPENED. Do not begin by restating, paraphrasing, or summarizing. Every response starts with NEW content — what happens NEXT.\n\n### Voice Isolation\nChat history is MEMORY for factual continuity only. Do NOT adopt its writing style, pacing, tone, or sentence patterns. Your narrative voice is defined by THIS PROMPT ALONE.\n\n### Repetition Kill\nAT ALL TIMES AVOID: repeating, parroting, echoing, and mirroring. Do not reuse distinctive words or phrases from the user's input. React, don't reflect.",
+            "content": "{{// Anti-pattern rules. Applied post-history at depth 0 for maximum adherence.}}{{trim}}\nEnforce these rules absolutely. They override any stylistic tendency from chat history.\n\n### Banned Constructions\n- Epanorthosis: \"Not X, but Y\" → Just state Y.\n- Hollow atmosphere: \"The silence hung heavy\" → Describe what fills the space.\n- Unnamed feelings: \"A feeling she couldn't name\" → Physical sensation instead.\n- Pathetic fallacy on cue: Weather must NOT mirror emotions conveniently.\n- Perception dodging: \"She didn't know what to say\" → Show the avoidance.\n- Sentient architecture: \"The castle whispered\" → Specific phenomena only.\n- Purple prose: No flowery metaphors, archaic diction, or melodrama.\n- Theatrical endings: NEVER close with a poetic summary, reflective wrap-up, or \"looking toward the future\" line.\n- Premature resolution: Do NOT resolve, close, or emotionally land a scene. End at the moment something has shifted — before it settles. The scene ends when the user ends it.\n- Ellipsis/dash cap: Maximum ONE em dash and ONE ellipsis per response.\n- Mouth choreography: \"She opened her mouth. Closed it.\" and all variants — show silence through body language, inaction, or a changed subject. Never this gesture.\n\n### Banned Clichés\n\"felt it like a physical blow\" / \"a breath she didn't know she was holding\" / \"time seemed to stop\" / \"the tension was palpable\" / \"a silence that spoke volumes\" / \"electricity crackled between them\" / \"swallowed thickly\" / \"the world fell away\" / \"searched their face for\" / \"without waiting for a response\" / \"eyes widened\" / \"chest tightened\" / \"heart raced\" / \"voice dropped\" / \"voice caught\" / \"a shiver ran down\" / \"couldn't help but\" / \"something shifted between them\" / \"the weight of\" / \"a mix of\" / \"a hint of\" / \"a flicker of\" / \"drew in a breath\" / \"let out a breath\" / \"exhaled slowly\"\n\n### Fresh Ink Only\nThe previous turn ALREADY HAPPENED. Do not begin by restating, paraphrasing, or summarizing. Every response starts with NEW content — what happens NEXT.\n\n### Voice Isolation\nChat history is MEMORY for factual continuity only. Do NOT adopt its writing style, pacing, tone, or sentence patterns. Your narrative voice is defined by THIS PROMPT ALONE.\n\n### Repetition Kill\nAT ALL TIMES AVOID: repeating, parroting, echoing, and mirroring. Do not reuse distinctive words or phrases from the user's input. React, don't reflect.",
             "injection_position": 1,
             "injection_depth": 0,
             "injection_order": 999,
@@ -275,7 +275,7 @@
             "marker": false,
             "name": "🪄 Formatting",
             "role": "system",
-            "content": "{{// Formatting rules and response continuation directive.}}{{trim}}\nWrite in present tense, third person. Refer to the user in third person regardless of their input format. Always wrap dialogue in quotation marks (\"). Inner thoughts are exempt and have their own formatting. Narrative language: English. Place translations for non-English phrases directly after they're spoken.\n\n((OOC: Communicate Out-Of-Character like this.)) No plot armor. Don't play for the user. Never end on handover cues; finish naturally.\n\n{{getvar::length}}\n\nNow, continue directly from the final line of the last message in the conversation with new content only.",
+            "content": "{{// Formatting rules and response continuation directive.}}{{trim}}\nWrite in {{getvar::tense}}, {{getvar::pov}}. Refer to the user in third person regardless of their input format. Always wrap dialogue in quotation marks (\"). Inner thoughts are exempt and have their own formatting. Narrative language: English. Place translations for non-English phrases directly after they're spoken.\n\n((OOC: Communicate Out-Of-Character like this.)) No plot armor. Don't play for the user. Never end on handover cues; finish naturally.\n\n{{getvar::length}}\n\nNow, continue directly from the final line of the last message in the conversation with new content only.",
             "injection_position": 1,
             "injection_depth": 1,
             "injection_order": 100,
@@ -293,6 +293,90 @@
             "injection_position": 1,
             "injection_depth": 1,
             "injection_order": 98,
+            "injection_trigger": [],
+            "forbid_overrides": false
+        },
+        {
+            "identifier": "tense-past",
+            "system_prompt": false,
+            "enabled": true,
+            "marker": false,
+            "name": "🪄 Tense: Past",
+            "role": "system",
+            "content": "{{setvar::tense::past tense}}",
+            "injection_position": 0,
+            "injection_depth": 4,
+            "injection_order": 99,
+            "injection_trigger": [],
+            "forbid_overrides": false
+        },
+        {
+            "identifier": "tense-present",
+            "system_prompt": false,
+            "enabled": false,
+            "marker": false,
+            "name": "🪄 Tense: Present",
+            "role": "system",
+            "content": "{{setvar::tense::present tense}}",
+            "injection_position": 0,
+            "injection_depth": 4,
+            "injection_order": 99,
+            "injection_trigger": [],
+            "forbid_overrides": false
+        },
+        {
+            "identifier": "pov-third-limited-char",
+            "system_prompt": false,
+            "enabled": true,
+            "marker": false,
+            "name": "🪄 POV: 3rd Limited — Character",
+            "role": "system",
+            "content": "{{setvar::pov::third person limited — anchor narration to {{char}}. Never enter {{user}}'s thoughts or feelings. Describe {{user}} only through what {{char}} observes: their words, body language, and visible choices.}}",
+            "injection_position": 0,
+            "injection_depth": 4,
+            "injection_order": 99,
+            "injection_trigger": [],
+            "forbid_overrides": false
+        },
+        {
+            "identifier": "pov-third-limited-user",
+            "system_prompt": false,
+            "enabled": false,
+            "marker": false,
+            "name": "🪄 POV: 3rd Limited — User",
+            "role": "system",
+            "content": "{{setvar::pov::third person limited — anchor narration to {{user}}'s character. Never enter {{char}}'s thoughts or feelings. Describe {{char}} only through what {{user}}'s character observes: their words, silences, body language, and visible choices.}}",
+            "injection_position": 0,
+            "injection_depth": 4,
+            "injection_order": 99,
+            "injection_trigger": [],
+            "forbid_overrides": false
+        },
+        {
+            "identifier": "pov-third-omni",
+            "system_prompt": false,
+            "enabled": false,
+            "marker": false,
+            "name": "🪄 POV: 3rd Omniscient",
+            "role": "system",
+            "content": "{{setvar::pov::third person omniscient — access any character's interior experience. Move between perspectives deliberately, never mid-paragraph without purpose.}}",
+            "injection_position": 0,
+            "injection_depth": 4,
+            "injection_order": 99,
+            "injection_trigger": [],
+            "forbid_overrides": false
+        },
+        {
+            "identifier": "pov-first",
+            "system_prompt": false,
+            "enabled": false,
+            "marker": false,
+            "name": "🪄 POV: 1st Person",
+            "role": "system",
+            "content": "{{setvar::pov::first person — narrate as {{user}}'s character using \"I.\" Maintain their voice, their knowledge gaps, their blind spots.}}",
+            "injection_position": 0,
+            "injection_depth": 4,
+            "injection_order": 99,
             "injection_trigger": [],
             "forbid_overrides": false
         }
@@ -384,6 +468,30 @@
                 },
                 {
                     "identifier": "realism-mode",
+                    "enabled": false
+                },
+                {
+                    "identifier": "tense-past",
+                    "enabled": true
+                },
+                {
+                    "identifier": "tense-present",
+                    "enabled": false
+                },
+                {
+                    "identifier": "pov-third-limited-char",
+                    "enabled": true
+                },
+                {
+                    "identifier": "pov-third-limited-user",
+                    "enabled": false
+                },
+                {
+                    "identifier": "pov-third-omni",
+                    "enabled": false
+                },
+                {
+                    "identifier": "pov-first",
                     "enabled": false
                 },
                 {
@@ -1781,10 +1889,34 @@
                 {
                     "text": "?\"",
                     "value": 1
+                },
+                {
+                    "text": " mouth opened",
+                    "value": -100
+                },
+                {
+                    "text": " opened her mouth",
+                    "value": -100
+                },
+                {
+                    "text": " opened his mouth",
+                    "value": -100
+                },
+                {
+                    "text": " opened their mouth",
+                    "value": -75
+                },
+                {
+                    "text": " mouth closed",
+                    "value": -75
+                },
+                {
+                    "text": " say nothing",
+                    "value": -50
                 }
             ]
         }
     ],
     "bias_preset_selected": "",
-    "notes": "Wandlight 1.3 — Timestamp moved to depth 1 with knowledge boundary reminder. Rational characters (Hermione) don’t assume malice."
+    "notes": "Wandlight 1.3 — Timestamp at depth 1 with knowledge boundary reminder. Rational characters don’t assume malice. Mouth-choreography ban in Prose Enforcement and Scrivener’s Ward. Toggleable tense (past/present) and perspective (3rd limited — character or user, 3rd omniscient, 1st person). Default: past tense, 3rd limited anchored to {{char}}."
 }
