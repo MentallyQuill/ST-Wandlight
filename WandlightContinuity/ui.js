@@ -65,6 +65,9 @@ export function renderSettingsPanel(container) {
                 // Snapshot the current state before overwriting
                 const settings = getSettings();
                 pushStateSnapshot(previous, 'Manual state edit', settings.maxSnapshots);
+                // Carry forward stateHistory so the snapshot isn't orphaned
+                imported.stateHistory = previous.stateHistory;
+                imported.memoHistory = previous.memoHistory || [];
                 saveState(imported);
                 if (typeof toastr !== 'undefined') toastr.success('State saved (edit snapshotted, undo available)');
                 stateEditor.style.display = 'none';

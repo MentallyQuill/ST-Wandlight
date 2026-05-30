@@ -307,11 +307,12 @@ export async function onExtractionTriggered(options = {}) {
         const currentState = getState();
 
         if (settings.autoApplyDelta) {
-            // Push a snapshot BEFORE applying for undo support
+            // Push a snapshot BEFORE applying for undo support,
+            // then save (saveStateWithSnapshot handles its own snapshot internally)
             pushStateSnapshot(currentState, 'Auto-extract: ' + (delta.summary || 'unnamed change'), settings.maxSnapshots);
 
             const newState = applyDelta(currentState, delta);
-            saveStateWithSnapshot(newState, settings.maxSnapshots);
+            saveState(newState);
 
             if (settings.debugMode) {
                 console.log(`${LOG_PREFIX} Delta auto-applied and state saved`);

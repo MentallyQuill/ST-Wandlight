@@ -7,7 +7,7 @@
  * Imported by: index.js, memo-builder.js, extractor.js, ui.js
  */
 
-import { MODULE_KEY, DEFAULT_SETTINGS, getDefaultState, SCHEMA_VERSION, LOG_PREFIX } from './constants.js';
+import { MODULE_KEY, DEFAULT_SETTINGS, getDefaultState, SCHEMA_VERSION, LOG_PREFIX, EXTENSION_FOLDER } from './constants.js';
 
 // ── Settings I/O ────────────────────────────────────────────────────────────────
 
@@ -118,40 +118,28 @@ export function pushStateSnapshot(state, summary, maxSnapshots) {
 
     const max = maxSnapshots || DEFAULT_SETTINGS.maxSnapshots;
 
-    // Build a compact snapshot: full state minus the history fields themselves
+    // Use structuredClone for full deep copy; fall back to JSON roundtrip
+    let snapshotState;
+    if (typeof structuredClone === 'function') {
+        try {
+            snapshotState = structuredClone(state);
+        } catch (_e) {
+            snapshotState = JSON.parse(JSON.stringify(state));
+        }
+    } else {
+        snapshotState = JSON.parse(JSON.stringify(state));
+    }
+
+    // Strip the snapshot of its own history/meta fields to keep it compact
+    snapshotState.stateHistory = [];
+    snapshotState.memoHistory = [];
+    snapshotState.lastDelta = null;
+
     const snapshot = {
         timestamp: Date.now(),
         summary: summary || 'Manual edit',
-        state: {
-            ...state,
-            stateHistory: [],    // Don't nest previous histories
-            memoHistory: [],     // Don't nest memo history
-            lastDelta: null,     // Don't nest the last delta
-        },
+        state: snapshotState,
     };
-
-    // Deep-clone the array sub-fields so they don't mutate when the live state changes
-    if (snapshot.state.canon && Array.isArray(snapshot.state.canon.divergences)) {
-        snapshot.state.canon = { ...snapshot.state.canon, divergences: [...snapshot.state.canon.divergences] };
-    }
-    if (snapshot.state.scene) {
-        snapshot.state.scene = {
-            ...snapshot.state.scene,
-            presentCharacters: Array.isArray(snapshot.state.scene.presentCharacters) ? [...snapshot.state.scene.presentCharacters] : [],
-            nearbyCharacters: Array.isArray(snapshot.state.scene.nearbyCharacters) ? [...snapshot.state.scene.nearbyCharacters] : [],
-        };
-    }
-    if (snapshot.state.knowledge && typeof snapshot.state.knowledge === 'object' && !Array.isArray(snapshot.state.knowledge)) {
-        const clonedKnowledge = {};
-        for (const [char, facts] of Object.entries(snapshot.state.knowledge)) {
-            clonedKnowledge[char] = Array.isArray(facts) ? [...facts] : [];
-        }
-        snapshot.state.knowledge = clonedKnowledge;
-    }
-    if (Array.isArray(snapshot.state.secrets)) snapshot.state.secrets = snapshot.state.secrets.map(s => ({ ...s }));
-    if (Array.isArray(snapshot.state.relationships)) snapshot.state.relationships = snapshot.state.relationships.map(r => ({ ...r }));
-    if (Array.isArray(snapshot.state.threads)) snapshot.state.threads = snapshot.state.threads.map(t => ({ ...t }));
-    if (Array.isArray(snapshot.state.continuityFlags)) snapshot.state.continuityFlags = snapshot.state.continuityFlags.map(f => ({ ...f }));
 
     state.stateHistory.push(snapshot);
 
@@ -347,13 +335,31 @@ export function validateDelta(delta) {
         }
     }
 
-    // Validate scene sub-fields
+    // Validate scene sub-fields with deep structural assertions
     if (changes.scene && typeof changes.scene === 'object') {
-        if (changes.scene.presentCharacters !== undefined && !Array.isArray(changes.scene.presentCharacters)) {
-            errors.push('scene.presentCharacters must be an array');
+        // Type-check presentCharacters
+        if (changes.scene.presentCharacters !== undefined) {
+            if (!Array.isArray(changes.scene.presentCharacters)) {
+                errors.push('scene.presentCharacters must be an array');
+            } else {
+                for (let i = 0; i < changes.scene.presentCharacters.length; i++) {
+                    if (typeof changes.scene.presentCharacters[i] !== 'string') {
+                        errors.push(`scene.presentCharacters[${i}] must be a string`);
+                    }
+                }
+            }
         }
-        if (changes.scene.nearbyCharacters !== undefined && !Array.isArray(changes.scene.nearbyCharacters)) {
-            errors.push('scene.nearbyCharacters must be an array');
+        // Type-check nearbyCharacters
+        if (changes.scene.nearbyCharacters !== undefined) {
+            if (!Array.isArray(changes.scene.nearbyCharacters)) {
+                errors.push('scene.nearbyCharacters must be an array');
+            } else {
+                for (let i = 0; i < changes.scene.nearbyCharacters.length; i++) {
+                    if (typeof changes.scene.nearbyCharacters[i] !== 'string') {
+                        errors.push(`scene.nearbyCharacters[${i}] must be a string`);
+                    }
+                }
+            }
         }
     }
 

@@ -7,6 +7,12 @@
 // ── Module key ──────────────────────────────────────────────────────────────────
 export const MODULE_KEY = 'wandlight_continuity';
 
+/**
+ * The extension folder name under data/default-user/extensions/third-party/.
+ * Must match the installed folder name exactly for renderExtensionTemplateAsync.
+ */
+export const EXTENSION_FOLDER = 'third-party/WandlightContinuity';
+
 // ── Logging prefix ──────────────────────────────────────────────────────────────
 export const LOG_PREFIX = '[Wandlight Continuity]';
 

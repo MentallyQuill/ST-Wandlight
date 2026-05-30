@@ -7,7 +7,7 @@
  *                    prompt-injector.js, extractor.js, ui.js
  */
 
-import { MODULE_KEY, LOG_PREFIX, DEFAULT_SETTINGS } from './constants.js';
+import { MODULE_KEY, LOG_PREFIX, DEFAULT_SETTINGS, EXTENSION_FOLDER } from './constants.js';
 import {
     getSettings,
     saveSettings,
@@ -196,7 +196,7 @@ async function mountSettingsPanel(ctx) {
     if (ctx.renderExtensionTemplateAsync) {
         try {
             const html = await ctx.renderExtensionTemplateAsync(
-                'third-party/WandlightContinuity',
+                EXTENSION_FOLDER,
                 'settings'
             );
             const extensionsSettings = document.getElementById('extensions_settings2');
@@ -380,6 +380,9 @@ function wireSettingsPanel(container) {
                     }
                     // Snapshot the existing state before importing over it
                     pushStateSnapshot(previous, 'Import state snapshot', settings.maxSnapshots);
+                    // Carry forward stateHistory so the snapshot isn't orphaned
+                    state.stateHistory = previous.stateHistory;
+                    state.memoHistory = previous.memoHistory || [];
                     saveState(state);
                     if (typeof toastr !== 'undefined') toastr.success('State imported successfully');
                     if (typeof globalThis._wandlightRefreshUI === 'function') {
@@ -396,13 +399,15 @@ function wireSettingsPanel(container) {
     const resetBtn = container.querySelector('#wandlight_reset_state');
     if (resetBtn) {
         resetBtn.addEventListener('click', () => {
-            if (typeof toastr !== 'undefined' && !confirm('Reset all continuity state to defaults? You can undo this via Undo Last Change.')) {
+            if (!confirm('Reset all continuity state to defaults? You can undo this via Undo Last Change.')) {
                 return;
             }
             // Snapshot before resetting so it can be undone
             const previous = getState();
             pushStateSnapshot(previous, 'Pre-reset snapshot', settings.maxSnapshots);
             const fresh = getDefaultState();
+            fresh.stateHistory = previous.stateHistory;
+            fresh.memoHistory = previous.memoHistory || [];
             saveState(fresh);
             if (typeof toastr !== 'undefined') toastr.success('State reset to defaults (undo available)');
             if (typeof globalThis._wandlightRefreshUI === 'function') {

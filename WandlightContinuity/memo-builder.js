@@ -75,14 +75,21 @@ export function buildMemo(state) {
         hasContent = true;
     }
 
-    // ── Character Knowledge (condensed to present characters only) ──
+    // ── Character Knowledge (fuzzy-matched to present characters) ──
     if (state.knowledge && Object.keys(state.knowledge).length > 0) {
         const presentChars = state.scene?.presentCharacters || [];
-        const presentSet = new Set(presentChars.map(c => c.toLowerCase()));
+        const presentLower = presentChars.map(c => c.toLowerCase().trim());
         const relevantKnowledge = {};
         for (const [char, facts] of Object.entries(state.knowledge)) {
-            // Only include knowledge for characters who are present in the scene
-            if (presentSet.has(char.toLowerCase())) {
+            // Fuzzy match: substring or word overlap with any present character name
+            const charLower = char.toLowerCase().trim();
+            const isRelevant = presentLower.some(pc =>
+                charLower === pc ||
+                charLower.includes(pc) ||
+                pc.includes(charLower) ||
+                (pc.split(' ').some(w => w.length > 2 && charLower.includes(w)))
+            );
+            if (isRelevant) {
                 relevantKnowledge[char] = facts;
             }
         }
