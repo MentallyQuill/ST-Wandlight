@@ -19,6 +19,7 @@ import {
     exportState,
     importState,
     validateDelta,
+    getDefaultState,
 } from './state-manager.js';
 import { buildMemo } from './memo-builder.js';
 import { installInterceptor } from './prompt-injector.js';
@@ -29,7 +30,7 @@ import { renderSettingsPanel, renderStatePanel } from './ui.js';
 // jQuery ready — this is the SillyTavern extension lifecycle entrypoint.
 // SillyTavern loads all .js files in the extension folder and waits for them to
 // execute. We use jQuery's $(document).ready() which fires after the page DOM
-// is ready (including any HTML templates).
+// is ready (including any HTML templates rendered by renderExtensionTemplateAsync).
 // ════════════════════════════════════════════════════════════════════════════════
 $(document).ready(async () => {
     'use strict';
@@ -57,14 +58,11 @@ $(document).ready(async () => {
     // ── Register slash commands ─────────────────────────────────────────────
     registerSlashCommands(ctx);
 
-    // ── Hook into settings menu ─────────────────────────────────────────────
-    hookSettingsMenu(ctx);
+    // ── Mount settings panel via ST's template system ───────────────────────
+    await mountSettingsPanel(ctx);
 
     // ── Expose global bridge functions ───────────────────────────────────────
     exposeGlobalBridge();
-
-    // ── Render state panel if state viewer is open ───────────────────────────
-    setupStatePanelTab();
 
     console.log(`${LOG_PREFIX} Extension initialized successfully`);
 });
@@ -74,17 +72,13 @@ $(document).ready(async () => {
 // ════════════════════════════════════════════════════════════════════════════════
 
 /**
- * Wires GENERATION_ENDED and CHAT_CHANGED events.
- * Uses ST's standard eventBus when available, falls back to event types object.
+ * Wires GENERATION_ENDED and CHAT_CHANGED events using ST's eventSource API.
  * @param {Object} ctx - SillyTavern.getContext() result
  */
 function wireEvents(ctx) {
-    // Access the event bus — ST exposes it as ctx.eventBus or as window.eventBus
-    const bus = ctx.eventBus || (typeof eventBus !== 'undefined' ? eventBus : null);
-
-    if (bus && bus.on) {
-        // Listen for GENERATION_ENDED to trigger extraction
-        bus.on('GENERATION_ENDED', () => {
+    // ── Primary API: eventSource.on(event_types.EVENT_NAME, handler) ─────
+    if (ctx.eventSource && ctx.event_types) {
+        ctx.eventSource.on(ctx.event_types.GENERATION_ENDED, () => {
             try {
                 onExtractionTriggered();
             } catch (e) {
@@ -92,8 +86,7 @@ function wireEvents(ctx) {
             }
         });
 
-        // Listen for CHAT_CHANGED to reset extraction counter and refresh state panel
-        bus.on('CHAT_CHANGED', () => {
+        ctx.eventSource.on(ctx.event_types.CHAT_CHANGED, () => {
             try {
                 resetExtractionCounter();
                 // Refresh state panel if visible
@@ -105,24 +98,38 @@ function wireEvents(ctx) {
             }
         });
 
-        console.log(`${LOG_PREFIX} Events wired to eventBus`);
-    } else {
-        // Fallback: use the events object pattern from the reference framework
-        // Some ST versions use tavern_events parameter
-        if (ctx.eventTypes) {
-            ctx.eventTypes['GENERATION_ENDED'] = ctx.eventTypes['GENERATION_ENDED'] || [];
-            ctx.eventTypes['GENERATION_ENDED'].push(() => {
-                try { onExtractionTriggered(); } catch (e) { console.error(e); }
-            });
-            ctx.eventTypes['CHAT_CHANGED'] = ctx.eventTypes['CHAT_CHANGED'] || [];
-            ctx.eventTypes['CHAT_CHANGED'].push(() => {
-                try { resetExtractionCounter(); } catch (e) { console.error(e); }
-            });
-            console.log(`${LOG_PREFIX} Events wired via eventTypes object`);
-        } else {
-            console.warn(`${LOG_PREFIX} No event bus found. Manual extraction via slash command is still available.`);
-        }
+        console.log(`${LOG_PREFIX} Events wired via eventSource`);
+        return;
     }
+
+    // ── Fallback 1: eventBus ─────────────────────────────────────────────
+    const bus = ctx.eventBus || (typeof eventBus !== 'undefined' ? eventBus : null);
+    if (bus && bus.on) {
+        bus.on('GENERATION_ENDED', () => {
+            try { onExtractionTriggered(); } catch (e) { console.error(e); }
+        });
+        bus.on('CHAT_CHANGED', () => {
+            try { resetExtractionCounter(); } catch (e) { console.error(e); }
+        });
+        console.log(`${LOG_PREFIX} Events wired via eventBus`);
+        return;
+    }
+
+    // ── Fallback 2: eventTypes object (legacy) ───────────────────────────
+    if (ctx.eventTypes) {
+        ctx.eventTypes['GENERATION_ENDED'] = ctx.eventTypes['GENERATION_ENDED'] || [];
+        ctx.eventTypes['GENERATION_ENDED'].push(() => {
+            try { onExtractionTriggered(); } catch (e) { console.error(e); }
+        });
+        ctx.eventTypes['CHAT_CHANGED'] = ctx.eventTypes['CHAT_CHANGED'] || [];
+        ctx.eventTypes['CHAT_CHANGED'].push(() => {
+            try { resetExtractionCounter(); } catch (e) { console.error(e); }
+        });
+        console.log(`${LOG_PREFIX} Events wired via eventTypes object`);
+        return;
+    }
+
+    console.warn(`${LOG_PREFIX} No event API found. Manual extraction via slash command is still available.`);
 }
 
 // ════════════════════════════════════════════════════════════════════════════════
@@ -134,17 +141,15 @@ function wireEvents(ctx) {
  * @param {Object} ctx - SillyTavern.getContext() result
  */
 function registerSlashCommands(ctx) {
-    if (!ctx.slashCommands && typeof registerSlashCommand !== 'function') {
+    if (typeof registerSlashCommand !== 'function') {
         console.warn(`${LOG_PREFIX} Slash command registration unavailable`);
         return;
     }
 
-    // Use registerSlashCommand from global scope (ST's native API)
-    const register = typeof registerSlashCommand === 'function' ? registerSlashCommand : null;
-    if (!register) return;
+    const register = registerSlashCommand;
 
     // ── /wandlight-extract ───────────────────────────────────────────────────
-    register('wandlight-extract', async (args) => {
+    register('wandlight-extract', async () => {
         await onExtractionTriggered({ force: true });
     }, undefined, '👁️ Manually run continuity state extraction', 'Wandlight');
 
@@ -153,12 +158,12 @@ function registerSlashCommands(ctx) {
         const state = getState();
         const memo = buildMemo(state);
         if (!memo) {
-            toastr.info('No continuity state to build memo from.');
+            if (typeof toastr !== 'undefined') toastr.info('No continuity state to build memo from.');
         } else {
             navigator.clipboard.writeText(memo).then(() => {
-                toastr.success('Continuity memo copied to clipboard');
+                if (typeof toastr !== 'undefined') toastr.success('Continuity memo copied to clipboard');
             }).catch(() => {
-                toastr.info(`[Wandlight Continuity State]\n${memo}`);
+                if (typeof toastr !== 'undefined') toastr.info(`[Wandlight Continuity State]\n${memo}`);
             });
         }
     }, undefined, '📋 Copy continuity memo to clipboard', 'Wandlight');
@@ -168,9 +173,9 @@ function registerSlashCommands(ctx) {
         const state = getState();
         const json = exportState(state);
         navigator.clipboard.writeText(json).then(() => {
-            toastr.success('Continuity state JSON copied to clipboard');
+            if (typeof toastr !== 'undefined') toastr.success('Continuity state JSON copied to clipboard');
         }).catch(() => {
-            toastr.info(`State JSON (${json.length} chars) ready; clipboard unavailable`);
+            if (typeof toastr !== 'undefined') toastr.info(`State JSON (${json.length} chars) ready; clipboard unavailable`);
         });
     }, undefined, '📄 Export full continuity state as JSON', 'Wandlight');
 
@@ -178,83 +183,54 @@ function registerSlashCommands(ctx) {
 }
 
 // ════════════════════════════════════════════════════════════════════════════════
-// Settings menu hook
+// Settings panel mounting
 // ════════════════════════════════════════════════════════════════════════════════
 
 /**
- * Hooks into ST's settings menu to add a "Wandlight Continuity" entry.
- * Renders the settings panel HTML when the user clicks the menu item.
+ * Mounts the settings panel using ST's renderExtensionTemplateAsync.
+ * This renders settings.html into the DOM and then wires all controls.
  * @param {Object} ctx - SillyTavern.getContext() result
  */
-function hookSettingsMenu(ctx) {
-    // ST's settings API: addExtenionsSettings(container) or settings property
-    // We render into the #extensions_settings_area div which ST provides.
-    const container = document.getElementById('extensions_settings_area');
-    if (!container) {
-        console.warn(`${LOG_PREFIX} #extensions_settings_area not found — settings panel unavailable`);
+async function mountSettingsPanel(ctx) {
+    // ── Render the template async ────────────────────────────────────────────
+    if (ctx.renderExtensionTemplateAsync) {
+        try {
+            const html = await ctx.renderExtensionTemplateAsync(
+                'third-party/WandlightContinuity',
+                'settings'
+            );
+            const extensionsSettings = document.getElementById('extensions_settings2');
+            if (extensionsSettings) {
+                extensionsSettings.insertAdjacentHTML('beforeend', html);
+            } else {
+                // Fallback: append to the older settings area
+                const legacyArea = document.getElementById('extensions_settings');
+                if (legacyArea) {
+                    legacyArea.insertAdjacentHTML('beforeend', html);
+                } else {
+                    console.warn(`${LOG_PREFIX} No extensions_settings container found — settings panel unavailable`);
+                    return;
+                }
+            }
+        } catch (e) {
+            console.error(`${LOG_PREFIX} renderExtensionTemplateAsync failed:`, e);
+            return;
+        }
+    } else {
+        console.warn(`${LOG_PREFIX} renderExtensionTemplateAsync not available — settings panel unavailable`);
         return;
     }
 
-    // Create the settings container for our extension
-    const settingsDiv = document.createElement('div');
-    settingsDiv.id = 'wandlight_continuity_settings';
-    settingsDiv.style.display = 'none';
-    container.appendChild(settingsDiv);
-
-    // Add menu item to the extensions listing
-    addSettingsMenuItem();
-
-    // Render settings HTML into the container
-    renderSettingsPanel(settingsDiv);
-
-    // Wire the settings panel interactivity after rendering
+    // ── Wire UI after a brief DOM settle ───────────────────────────────────
     setTimeout(() => {
-        wireSettingsPanel(settingsDiv);
+        const container = document.getElementById('wandlight_continuity_settings');
+        if (container) {
+            renderSettingsPanel(container);
+            wireSettingsPanel(container);
+        }
     }, 100);
 
-    console.log(`${LOG_PREFIX} Settings panel hooked into ST`);
-}
-
-/**
- * Adds "Wandlight Continuity" to the extensions navigation list.
- */
-function addSettingsMenuItem() {
-    const extMenu = document.getElementById('extensions_list');
-    if (!extMenu) {
-        console.warn(`${LOG_PREFIX} #extensions_list not found — menu item unavailable`);
-        return;
-    }
-
-    const item = document.createElement('div');
-    item.className = 'list-group-item';
-    item.id = 'wandlight_continuity_menu_item';
-    item.textContent = 'Wandlight Continuity';
-    item.dataset.target = 'wandlight_continuity_settings';
-    item.style.cursor = 'pointer';
-
-    item.addEventListener('click', () => {
-        // Hide all extension settings panels
-        document.querySelectorAll('#extensions_settings_area > div').forEach(d => {
-            d.style.display = 'none';
-        });
-        // Show ours
-        const panel = document.getElementById('wandlight_continuity_settings');
-        if (panel) panel.style.display = 'block';
-
-        // Refresh state display when panel opens
-        if (typeof globalThis._wandlightRefreshUI === 'function') {
-            globalThis._wandlightRefreshUI();
-        }
-
-        // Highlight active menu item
-        document.querySelectorAll('#extensions_list .list-group-item').forEach(el => {
-            el.classList.remove('active');
-        });
-        item.classList.add('active');
-    });
-
-    extMenu.appendChild(item);
-    console.log(`${LOG_PREFIX} Settings menu item added`);
+    console.log(`${LOG_PREFIX} Settings panel mounted`);
 }
 
 /**
@@ -323,6 +299,7 @@ function wireSettingsPanel(container) {
                 if (typeof toastr !== 'undefined') toastr.warning('No pending delta to apply');
                 return;
             }
+            // Snapshot before applying
             pushStateSnapshot(state, 'Manual delta apply: ' + (state.lastDelta.summary || 'unnamed'), settings.maxSnapshots);
             const newState = applyDelta(state, state.lastDelta);
             newState.lastDelta = null;
@@ -395,11 +372,14 @@ function wireSettingsPanel(container) {
                 if (!file) return;
                 const reader = new FileReader();
                 reader.onload = (re) => {
+                    const previous = getState();
                     const { state, error } = importState(re.target.result);
                     if (error) {
                         if (typeof toastr !== 'undefined') toastr.error('Import failed: ' + error);
                         return;
                     }
+                    // Snapshot the existing state before importing over it
+                    pushStateSnapshot(previous, 'Import state snapshot', settings.maxSnapshots);
                     saveState(state);
                     if (typeof toastr !== 'undefined') toastr.success('State imported successfully');
                     if (typeof globalThis._wandlightRefreshUI === 'function') {
@@ -412,17 +392,19 @@ function wireSettingsPanel(container) {
         });
     }
 
-    // ── "Reset State" button ──────────────────────────────────────────────
+    // ── "Reset State" button ─────────────────────────────────────────────
     const resetBtn = container.querySelector('#wandlight_reset_state');
     if (resetBtn) {
         resetBtn.addEventListener('click', () => {
-            if (typeof toastr !== 'undefined' && !confirm('Reset all continuity state? This cannot be undone.')) {
+            if (typeof toastr !== 'undefined' && !confirm('Reset all continuity state to defaults? You can undo this via Undo Last Change.')) {
                 return;
             }
-            const { getDefaultState } = require('./constants.js');
+            // Snapshot before resetting so it can be undone
+            const previous = getState();
+            pushStateSnapshot(previous, 'Pre-reset snapshot', settings.maxSnapshots);
             const fresh = getDefaultState();
             saveState(fresh);
-            if (typeof toastr !== 'undefined') toastr.success('State reset to defaults');
+            if (typeof toastr !== 'undefined') toastr.success('State reset to defaults (undo available)');
             if (typeof globalThis._wandlightRefreshUI === 'function') {
                 globalThis._wandlightRefreshUI();
             }
@@ -441,21 +423,12 @@ function exposeGlobalBridge() {
     globalThis._wandlightRefreshUI = refreshStatePanel;
     globalThis._wandlightGetState = getState;
     globalThis._wandlightValidateDelta = validateDelta;
-    console.log(`${LOG_PREFIX} Global bridge exposed: _wandlightBuildMemo, _wandlightRefreshUI, _wandlightGetState, _wandlightValidateDelta`);
+    console.log(`${LOG_PREFIX} Global bridge exposed`);
 }
 
 // ════════════════════════════════════════════════════════════════════════════════
 // State panel rendering
 // ════════════════════════════════════════════════════════════════════════════════
-
-/**
- * Sets up a tab or panel area for the state viewer within the settings panel.
- */
-function setupStatePanelTab() {
-    // The state panel is rendered within the settings HTML by ui.js.
-    // This function sets up periodic refresh when the panel is visible.
-    console.log(`${LOG_PREFIX} State panel tab ready`);
-}
 
 /**
  * Refreshes the state display panel. Called from buttons, events, and
@@ -467,7 +440,10 @@ function refreshStatePanel() {
 
     const state = getState();
     if (!state) {
-        container.innerHTML = '<em>No continuity state loaded</em>';
+        container.textContent = '';
+        const em = document.createElement('em');
+        em.textContent = 'No continuity state loaded';
+        container.appendChild(em);
         return;
     }
 
@@ -479,27 +455,35 @@ function refreshStatePanel() {
         if (state.lastDelta) {
             const summary = state.lastDelta.summary || '(no summary)';
             const changeKeys = Object.keys(state.lastDelta.changes || {});
-            deltaContainer.innerHTML = [
-                `<strong>Pending Delta:</strong> ${escapeHtml(summary)}`,
-                `<div class="wandlight-delta-changes">Keys: ${changeKeys.length ? changeKeys.map(escapeHtml).join(', ') : '(none)'}</div>`,
-                `<pre class="wandlight-delta-json">${escapeHtml(JSON.stringify(state.lastDelta, null, 2))}</pre>`,
-            ].join('');
+            const deltaJson = JSON.stringify(state.lastDelta, null, 2);
+
+            // Build preview using safe DOM construction to avoid HTML injection
+            deltaContainer.textContent = ''; // clear
+            const wrapper = document.createElement('div');
+
+            const strong = document.createElement('strong');
+            strong.textContent = 'Pending Delta: ';
+            wrapper.appendChild(strong);
+            wrapper.appendChild(document.createTextNode(summary));
+
+            const keyDiv = document.createElement('div');
+            keyDiv.className = 'wandlight-delta-changes';
+            keyDiv.textContent = 'Keys: ' + (changeKeys.length ? changeKeys.join(', ') : '(none)');
+            wrapper.appendChild(keyDiv);
+
+            const pre = document.createElement('pre');
+            pre.className = 'wandlight-delta-json';
+            pre.textContent = deltaJson;
+            wrapper.appendChild(pre);
+
+            deltaContainer.appendChild(wrapper);
         } else {
-            deltaContainer.innerHTML = '<em>No pending delta</em>';
+            deltaContainer.textContent = '';
+            const em = document.createElement('em');
+            em.textContent = 'No pending delta';
+            deltaContainer.appendChild(em);
         }
     }
 }
 
-// ════════════════════════════════════════════════════════════════════════════════
-// Utilities
-// ════════════════════════════════════════════════════════════════════════════════
 
-function escapeHtml(str) {
-    if (!str) return '';
-    return String(str)
-        .replace(/&/g, '&')
-        .replace(/</g, '<')
-        .replace(/>/g, '>')
-        .replace(/"/g, '"')
-        .replace(/'/g, '&#039;');
-}

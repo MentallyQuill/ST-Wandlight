@@ -7,11 +7,11 @@
  */
 
 import { buildMemo } from './memo-builder.js';
-import { getState } from './state-manager.js';
+import { getState, saveState, pushStateSnapshot, importState, getSettings } from './state-manager.js';
 
 /**
  * Renders the settings panel HTML into the container.
- * Since settings.html is auto-loaded by ST's extension loader,
+ * Since settings.html is loaded via renderExtensionTemplateAsync(),
  * this function populates dynamic values, wires range displays,
  * and initializes the memo preview.
  *
@@ -45,20 +45,28 @@ export function renderSettingsPanel(container) {
         });
     }
 
-    // Save edited state
+    // Save edited state — with snapshot, migration, and validation
     const saveStateBtn = container.querySelector('#wandlight_save_state');
     if (saveStateBtn && stateEditor && stateDisplay) {
         saveStateBtn.addEventListener('click', () => {
             try {
                 const parsed = JSON.parse(stateEditor.value);
-                // Validate it looks like a WandlightState
                 if (!parsed || typeof parsed !== 'object') {
                     if (typeof toastr !== 'undefined') toastr.error('Invalid state JSON');
                     return;
                 }
-                const { saveState } = require('./state-manager.js');
-                saveState(parsed);
-                if (typeof toastr !== 'undefined') toastr.success('State saved');
+                // Use importState for migration + validation
+                const previous = getState();
+                const { state: imported, error } = importState(JSON.stringify(parsed));
+                if (error) {
+                    if (typeof toastr !== 'undefined') toastr.error('State validation failed: ' + error);
+                    return;
+                }
+                // Snapshot the current state before overwriting
+                const settings = getSettings();
+                pushStateSnapshot(previous, 'Manual state edit', settings.maxSnapshots);
+                saveState(imported);
+                if (typeof toastr !== 'undefined') toastr.success('State saved (edit snapshotted, undo available)');
                 stateEditor.style.display = 'none';
                 stateDisplay.style.display = 'block';
                 if (typeof globalThis._wandlightRefreshUI === 'function') {
@@ -99,7 +107,7 @@ function refreshMemoPreview() {
         }
         const memo = buildMemo(state);
         if (!memo || !memo.trim()) {
-            preview.textContent = '(Memo is empty — populate continuity state via extraction or manual editing)';
+            preview.textContent = '(Memo is empty \u2014 populate continuity state via extraction or manual editing)';
         } else {
             preview.textContent = memo;
         }
@@ -111,6 +119,7 @@ function refreshMemoPreview() {
 /**
  * Renders the state viewer panel content.
  * Shows a formatted summary of each state section with edit capability.
+ * Uses textContent for all user-derived data to prevent HTML injection.
  *
  * @param {HTMLElement} container - The state display div
  * @param {Object} state - Current WandlightState
@@ -120,75 +129,152 @@ export function renderStatePanel(container, state) {
 
     const sections = [];
 
-    // Section renderer helper
+    /**
+     * Adds a titled section using safe DOM construction (textContent, not innerHTML).
+     * @param {string} title - Section title
+     * @param {*} data - The data to render
+     * @param {string} icon - Emoji icon prefix
+     */
     function addSection(title, data, icon) {
         if (!data) return;
-        const lines = [];
+
+        const sectionDiv = document.createElement('div');
+        sectionDiv.className = 'wandlight-state-section';
+        sectionDiv.style.marginBottom = '8px';
+
+        const headerDiv = document.createElement('div');
+        headerDiv.style.fontWeight = 'bold';
+        headerDiv.style.opacity = '0.9';
+        headerDiv.style.marginBottom = '2px';
+        headerDiv.textContent = (icon ? icon + ' ' : '') + title;
+        sectionDiv.appendChild(headerDiv);
+
+        const contentDiv = document.createElement('div');
+        contentDiv.style.paddingLeft = '12px';
+        contentDiv.style.fontSize = '0.95em';
+        sectionDiv.appendChild(contentDiv);
+
+        let hasContent = false;
+
         if (typeof data === 'string') {
-            lines.push(data);
+            const lineDiv = document.createElement('div');
+            lineDiv.textContent = data;
+            contentDiv.appendChild(lineDiv);
+            hasContent = true;
         } else if (Array.isArray(data)) {
             if (data.length === 0) {
-                lines.push('<span style="opacity:0.5;">(empty)</span>');
+                const emptyDiv = document.createElement('div');
+                emptyDiv.style.opacity = '0.5';
+                emptyDiv.textContent = '(empty)';
+                contentDiv.appendChild(emptyDiv);
+                hasContent = true;
             } else {
                 data.forEach((item, i) => {
+                    const lineDiv = document.createElement('div');
                     if (typeof item === 'string') {
-                        lines.push(`<span style="opacity:0.7;">${i + 1}.</span> ${escapeHtml(item)}`);
+                        const numSpan = document.createElement('span');
+                        numSpan.style.opacity = '0.7';
+                        numSpan.textContent = (i + 1) + '. ';
+                        lineDiv.appendChild(numSpan);
+                        lineDiv.appendChild(document.createTextNode(item));
                     } else if (item && typeof item === 'object') {
-                        // Handle objects (relationships, threads)
-                        const label = item.name || item.id || item.topic || `Item ${i + 1}`;
+                        const numSpan = document.createElement('span');
+                        numSpan.style.opacity = '0.7';
+                        numSpan.textContent = (i + 1) + '. ';
+                        lineDiv.appendChild(numSpan);
+                        const label = item.name || item.id || item.topic || 'Item ' + (i + 1);
+                        const labelStrong = document.createElement('strong');
+                        labelStrong.textContent = String(label);
+                        lineDiv.appendChild(labelStrong);
                         const detail = item.content || item.detail || item.status || item.state || '';
-                        const detailStr = detail ? ` → <span style="opacity:0.7;">${escapeHtml(String(detail))}</span>` : '';
-                        lines.push(`<span style="opacity:0.7;">${i + 1}.</span> <strong>${escapeHtml(String(label))}</strong>${detailStr}`);
+                        if (detail) {
+                            const arrowSpan = document.createElement('span');
+                            arrowSpan.textContent = ' \u2192 ';
+                            lineDiv.appendChild(arrowSpan);
+                            const detailSpan = document.createElement('span');
+                            detailSpan.style.opacity = '0.7';
+                            detailSpan.textContent = String(detail);
+                            lineDiv.appendChild(detailSpan);
+                        }
                     }
+                    contentDiv.appendChild(lineDiv);
                 });
+                hasContent = true;
             }
         } else if (data && typeof data === 'object') {
             Object.entries(data).forEach(([k, v]) => {
                 if (v === null || v === undefined || v === '') return;
-                lines.push(`<strong>${escapeHtml(k)}:</strong> <span style="opacity:0.8;">${escapeHtml(typeof v === 'object' ? JSON.stringify(v) : String(v))}</span>`);
+                const lineDiv = document.createElement('div');
+                const keyStrong = document.createElement('strong');
+                keyStrong.textContent = k + ': ';
+                lineDiv.appendChild(keyStrong);
+                const valSpan = document.createElement('span');
+                valSpan.style.opacity = '0.8';
+                valSpan.textContent = typeof v === 'object' ? JSON.stringify(v) : String(v);
+                lineDiv.appendChild(valSpan);
+                contentDiv.appendChild(lineDiv);
             });
+            hasContent = true;
         }
 
-        if (lines.length > 0) {
-            sections.push([
-                `<div class="wandlight-state-section" style="margin-bottom:8px;">`,
-                `<div style="font-weight:bold;opacity:0.9;margin-bottom:2px;">${icon ? icon + ' ' : ''}${escapeHtml(title)}</div>`,
-                ...lines.map(l => `<div style="padding-left:12px;font-size:0.95em;">${l}</div>`),
-                `</div>`,
-            ].join(''));
+        if (hasContent) {
+            sections.push(sectionDiv);
         }
     }
 
-    addSection('Canon Facts', state.canon, '📖');
-    addSection('Scene', state.scene, '🎬');
-    addSection('Knowledge', state.knowledge, '🧠');
-    addSection('Secrets', state.secrets, '🔒');
-    addSection('Relationships', state.relationships, '👥');
-    addSection('Threads', state.threads, '🧵');
-    addSection('Continuity Flags', state.continuityFlags, '🏴');
+    addSection('Canon Facts', state.canon, '\uD83D\uDCD6');
+    addSection('Scene', state.scene, '\uD83C\uDFAC');
+    addSection('Knowledge', state.knowledge, '\uD83E\uDDE0');
+    addSection('Secrets', state.secrets, '\uD83D\uDD12');
+    addSection('Relationships', state.relationships, '\uD83D\uDC65');
+    addSection('Threads', state.threads, '\uD83E\uDDF5');
+    addSection('Continuity Flags', state.continuityFlags, '\uD83C\uDFF4');
 
     if (state.stateHistory && state.stateHistory.length > 0) {
-        sections.push([
-            `<div class="wandlight-state-section" style="margin-bottom:8px;">`,
-            `<div style="font-weight:bold;opacity:0.9;margin-bottom:2px;">📋 History</div>`,
-            `<div style="padding-left:12px;font-size:0.95em;opacity:0.7;">`,
-            `${state.stateHistory.length} snapshot(s) available for undo`,
-            `</div>`,
-            `</div>`,
-        ].join(''));
+        const historyDiv = document.createElement('div');
+        historyDiv.className = 'wandlight-state-section';
+        historyDiv.style.marginBottom = '8px';
+
+        const historyHeader = document.createElement('div');
+        historyHeader.style.fontWeight = 'bold';
+        historyHeader.style.opacity = '0.9';
+        historyHeader.style.marginBottom = '2px';
+        historyHeader.textContent = '\uD83D\uDCCB History';
+        historyDiv.appendChild(historyHeader);
+
+        const historyContent = document.createElement('div');
+        historyContent.style.paddingLeft = '12px';
+        historyContent.style.fontSize = '0.95em';
+        historyContent.style.opacity = '0.7';
+        historyContent.textContent = state.stateHistory.length + ' snapshot(s) available for undo';
+        historyDiv.appendChild(historyContent);
+
+        sections.push(historyDiv);
     }
 
     // Version and metadata footer
-    sections.push([
-        `<div style="margin-top:8px;padding-top:6px;border-top:1px solid rgba(255,255,255,0.1);font-size:0.75em;opacity:0.5;">`,
-        `Schema version: ${escapeHtml(String(state.schemaVersion || '1'))}`,
-        state.lastModified ? ` | Modified: ${escapeHtml(String(state.lastModified))}` : '',
-        `</div>`,
-    ].join(''));
+    const footerDiv = document.createElement('div');
+    footerDiv.style.marginTop = '8px';
+    footerDiv.style.paddingTop = '6px';
+    footerDiv.style.borderTop = '1px solid rgba(255,255,255,0.1)';
+    footerDiv.style.fontSize = '0.75em';
+    footerDiv.style.opacity = '0.5';
+    let footerText = 'Schema version: ' + (state.schemaVersion || '1');
+    if (state.lastModified) {
+        footerText += ' | Modified: ' + state.lastModified;
+    }
+    footerDiv.textContent = footerText;
+    sections.push(footerDiv);
 
-    container.innerHTML = sections.length > 0
-        ? sections.join('')
-        : '<em>No continuity state data available</em>';
+    // Clear container and append all section divs
+    container.textContent = '';
+    if (sections.length > 0) {
+        sections.forEach(s => container.appendChild(s));
+    } else {
+        const em = document.createElement('em');
+        em.textContent = 'No continuity state data available';
+        container.appendChild(em);
+    }
 }
 
 /**
@@ -206,14 +292,4 @@ function wireRangeDisplay(inputId, displayId) {
     };
     input.addEventListener('input', updateDisplay);
     updateDisplay();
-}
-
-function escapeHtml(str) {
-    if (!str) return '';
-    return String(str)
-        .replace(/&/g, '&')
-        .replace(/</g, '<')
-        .replace(/>/g, '>')
-        .replace(/"/g, '"')
-        .replace(/'/g, '&#039;');
 }

@@ -1,8 +1,9 @@
 /**
  * prompt-injector.js — Wandlight Continuity
  * Registers the generate_interceptor on globalThis that prepends the
- * continuity memo into the chat array clone before generation.
- * Ephemeral: only modifies the in-flight clone, never persists to messages.
+ * continuity memo into a structurally cloned chat message before generation.
+ * Ephemeral: uses structuredClone/JSON roundtrip so injected text never
+ * writes back to stored chat messages.
  *
  * Imports: constants.js, state-manager.js, memo-builder.js
  * Imported by: index.js
@@ -29,16 +30,17 @@ export function installInterceptor() {
 }
 
 /**
- * ST's generate_interceptor hook function. Called mid-flight with a mutable
- * CLONE of the chat array. The clone is ephemeral — modifications here never
- * write back to stored chat messages.
+ * ST's generate_interceptor hook function. Called mid-flight with a chat array
+ * that may be mutable. To prevent injection from persisting into stored chat
+ * history, we structurally clone the target message before modifying it and
+ * then assign the clone back into the chat array slot.
  *
  * This follows the generate_interceptor contract:
- * - Receives a MUTABLE clone of chat array (modifications don't persist)
+ * - Receives chat array (may be mutable — do NOT assume it's a clone)
  * - Must NOT throw (ST wraps in try/catch but we still guard)
  * - Cannot be async per ST's current manifest hook spec
  *
- * @param {Array} chat - Mutable clone of the chat array (ephemeral)
+ * @param {Array} chat - Chat array (may be mutable)
  */
 function wandlightContinuityInterceptor(chat) {
     try {
@@ -56,6 +58,15 @@ function wandlightContinuityInterceptor(chat) {
         const memo = buildMemo(state);
         if (!memo || typeof memo !== 'string' || memo.trim().length === 0) return;
 
+        // ── Token guard: skip if memo exceeds the configured cap ──────────
+        const estimatedTokens = estimateTokens(memo);
+        if (estimatedTokens > MEMO_MAX_TOKENS) {
+            if (settings.debugMode) {
+                console.warn(`${LOG_PREFIX} Memo estimated at ${estimatedTokens} tokens (cap: ${MEMO_MAX_TOKENS}) — skipping injection`);
+            }
+            return;
+        }
+
         // Find the last user message to prepend injection to.
         // Walk backward so we only modify the most recent user turn.
         for (let i = chat.length - 1; i >= 0; i--) {
@@ -71,8 +82,6 @@ function wandlightContinuityInterceptor(chat) {
             const originalContent = msg[contentField];
 
             // DOUBLE-INJECTION GUARD: skip if memo marker already present.
-            // This can happen if ST re-processes an already-modified array
-            // or if another extension prepends the same memo pattern.
             if (originalContent && originalContent.includes(MEMO_MARKER)) {
                 if (settings.debugMode) {
                     console.log(`${LOG_PREFIX} Memo marker already present — skipping injection`);
@@ -80,10 +89,18 @@ function wandlightContinuityInterceptor(chat) {
                 return;
             }
 
-            // Prepend the memo before the user's message text.
-            // This is ephemeral: the chat array is a clone, so this never
-            // persists to the stored chat messages.
-            msg[contentField] = memo + '\n\n' + originalContent;
+            // ── Ephemeral clone to prevent mutation of stored chat history ──
+            // structuredClone is the preferred deep-copy mechanism; fall back
+            // to JSON roundtrip for older ST engines that lack structuredClone.
+            const cloned = typeof structuredClone === 'function'
+                ? structuredClone(msg)
+                : JSON.parse(JSON.stringify(msg));
+
+            // Prepend the memo before the user's message text in the clone
+            cloned[contentField] = memo + '\n\n' + originalContent;
+
+            // Replace the chat array entry with the cloned message
+            chat[i] = cloned;
 
             if (settings.debugMode) {
                 console.log(`${LOG_PREFIX} Memo injected into last user message (${memo.length} chars, ~${estimateTokens(memo)} tokens)`);

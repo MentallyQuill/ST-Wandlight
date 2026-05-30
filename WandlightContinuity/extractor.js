@@ -132,10 +132,8 @@ function parseDeltaResponse(response) {
 
 /**
  * Runs a quiet LLM call to extract continuity state changes.
- * Uses SillyTavern.generateQuietPrompt with generateRaw fallback.
- *
- * The generateQuietPrompt signature in ST 1.12+ is:
- *   generateQuietPrompt(prompt, quietToLlm, quietName, quietImage, forceSystemPrompt, systemPromptOverride, quietModal)
+ * Uses object-style API: generateQuietPrompt({ quietPrompt }) and
+ * generateRaw({ systemPrompt, prompt, prefill }) per current ST docs.
  *
  * @param {string} stateJson - JSON string of current state
  * @param {string} messages - Recent roleplay messages text
@@ -156,40 +154,36 @@ async function runExtractionCall(stateJson, messages) {
     let response = null;
 
     try {
-        // ── Try generateQuietPrompt ──────────────────────────────────────────
+        // ── Try generateQuietPrompt (object-style, current ST API) ──────────
         if (ctx && typeof ctx.generateQuietPrompt === 'function') {
             if (settings.debugMode) {
                 console.log(`${LOG_PREFIX} Calling generateQuietPrompt for extraction...`);
             }
-            response = await ctx.generateQuietPrompt(
-                userPrompt,       // prompt
-                false,            // quietToLlm — don't forward to main chat
-                '',               // quietName
-                '',               // quietImage
-                false,            // forceSystemPrompt
-                systemPrompt,     // systemPromptOverride
-                '',               // quietModal — use current
-            );
+            response = await ctx.generateQuietPrompt({
+                quietPrompt: userPrompt,
+                quietToLlm: false,
+                quietName: '',
+                quietImage: '',
+                forceSystemPrompt: false,
+                systemPromptOverride: systemPrompt,
+                quietModal: '',
+            });
         }
-        // ── Fallback: generateRaw ────────────────────────────────────────────
+        // ── Fallback: generateRaw (object-style) ────────────────────────────
         else if (ctx && typeof ctx.generateRaw === 'function') {
             console.log(`${LOG_PREFIX} generateQuietPrompt unavailable, falling back to generateRaw`);
-            // generateRaw(prompt, apiConfig, instruct, quietName, quietImage)
-            response = await ctx.generateRaw(
-                systemPrompt + '\n\n' + userPrompt,
-                '',    // apiConfig — use default
-                false, // instruct — raw completion
-                '',    // quietName
-                '',    // quietImage
-            );
+            response = await ctx.generateRaw({
+                systemPrompt: systemPrompt,
+                prompt: userPrompt,
+                prefill: '',
+            });
         }
-        // ── Hard fallback: generate() via the context ─────────────────────────
+        // ── Hard fallback: ctx.generate() ───────────────────────────────────
         else if (ctx && typeof ctx.generate === 'function') {
             console.log(`${LOG_PREFIX} Falling back to ctx.generate() for extraction`);
             response = await ctx.generate(systemPrompt + '\n\n' + userPrompt);
-        }
-        else {
-            console.warn(`${LOG_PREFIX} No generation function available for extraction (generateQuietPrompt, generateRaw, or generate)`);
+        } else {
+            console.warn(`${LOG_PREFIX} No generation function available for extraction`);
             return null;
         }
     } catch (e) {
@@ -252,7 +246,7 @@ export async function onExtractionTriggered(options = {}) {
         const chat = ctx && ctx.chat ? ctx.chat : null;
         if (!chat || !Array.isArray(chat) || chat.length === 0) {
             if (settings.debugMode) {
-                console.log(`${LOG_PREFIX} No chat messages — cannot run extraction`);
+                console.log(`${LOG_PREFIX} No chat messages \u2014 cannot run extraction`);
             }
             return;
         }
@@ -295,7 +289,7 @@ export async function onExtractionTriggered(options = {}) {
         // Check for no-op delta (empty changes)
         if (!delta.changes || Object.keys(delta.changes).length === 0) {
             if (settings.debugMode) {
-                console.log(`${LOG_PREFIX} Extraction delta has no changes — skipping`);
+                console.log(`${LOG_PREFIX} Extraction delta has no changes \u2014 skipping`);
             }
             // Still store the no-op delta for diagnostic transparency
             const currentState = getState();
