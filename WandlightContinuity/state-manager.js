@@ -388,14 +388,17 @@ export function validateDelta(delta) {
                     errors.push(`secrets.${op} must be an array`);
                 } else if (op === 'updated') {
                     changes.secrets.updated.forEach((upd, i) => {
-                        if (typeof upd.index !== 'number' || upd.index < 0 || !Number.isFinite(upd.index)) {
-                            errors.push(`secrets.updated[${i}].index must be a nonnegative finite integer`);
+                        if (!Number.isInteger(upd.index) || upd.index < 0) {
+                            errors.push(`secrets.updated[${i}].index must be a nonnegative integer`);
+                        }
+                        if (upd.changes === undefined || upd.changes === null || typeof upd.changes !== 'object' || Array.isArray(upd.changes)) {
+                            errors.push(`secrets.updated[${i}].changes must be a non-null object`);
                         }
                     });
                 } else if (op === 'removed') {
                     changes.secrets.removed.forEach((idx, i) => {
-                        if (typeof idx !== 'number' || idx < 0 || !Number.isFinite(idx)) {
-                            errors.push(`secrets.removed[${i}] must be a nonnegative finite integer`);
+                        if (!Number.isInteger(idx) || idx < 0) {
+                            errors.push(`secrets.removed[${i}] must be a nonnegative integer`);
                         }
                     });
                 }
@@ -422,14 +425,23 @@ export function validateDelta(delta) {
                     });
                 } else if (op === 'updated') {
                     changes.relationships.updated.forEach((upd, i) => {
-                        if (typeof upd.index !== 'number' || upd.index < 0 || !Number.isFinite(upd.index)) {
-                            errors.push(`relationships.updated[${i}].index must be a nonnegative finite integer`);
+                        if (!Number.isInteger(upd.index) || upd.index < 0) {
+                            errors.push(`relationships.updated[${i}].index must be a nonnegative integer`);
+                        }
+                        // Validate enum values in the changes sub-object
+                        if (upd.changes && typeof upd.changes === 'object') {
+                            if (upd.changes.tension !== undefined && !VALID_ENUMS.tension.has(upd.changes.tension)) {
+                                errors.push(`relationships.updated[${i}].changes.tension "${upd.changes.tension}" must be low|medium|high|critical`);
+                            }
+                            if (upd.changes.trust !== undefined && !VALID_ENUMS.trust.has(upd.changes.trust)) {
+                                errors.push(`relationships.updated[${i}].changes.trust "${upd.changes.trust}" must be low|medium|high|absolute`);
+                            }
                         }
                     });
                 } else if (op === 'removed') {
                     changes.relationships.removed.forEach((idx, i) => {
-                        if (typeof idx !== 'number' || idx < 0 || !Number.isFinite(idx)) {
-                            errors.push(`relationships.removed[${i}] must be a nonnegative finite integer`);
+                        if (!Number.isInteger(idx) || idx < 0) {
+                            errors.push(`relationships.removed[${i}] must be a nonnegative integer`);
                         }
                     });
                 }
@@ -453,8 +465,14 @@ export function validateDelta(delta) {
                     });
                 } else if (op === 'updated') {
                     changes.threads.updated.forEach((upd, i) => {
-                        if (typeof upd.index !== 'number' || upd.index < 0 || !Number.isFinite(upd.index)) {
-                            errors.push(`threads.updated[${i}].index must be a nonnegative finite integer`);
+                        if (!Number.isInteger(upd.index) || upd.index < 0) {
+                            errors.push(`threads.updated[${i}].index must be a nonnegative integer`);
+                        }
+                        // Validate enum values in the changes sub-object
+                        if (upd.changes && typeof upd.changes === 'object') {
+                            if (upd.changes.status !== undefined && !VALID_ENUMS.threadStatus.has(upd.changes.status)) {
+                                errors.push(`threads.updated[${i}].changes.status "${upd.changes.status}" must be active|dormant|resolved`);
+                            }
                         }
                     });
                 }
@@ -485,8 +503,8 @@ export function validateDelta(delta) {
                 errors.push('continuityFlags.resolved must be an array');
             } else {
                 changes.continuityFlags.resolved.forEach((idx, i) => {
-                    if (typeof idx !== 'number' || idx < 0 || !Number.isFinite(idx)) {
-                        errors.push(`continuityFlags.resolved[${i}] must be a nonnegative finite integer`);
+                    if (!Number.isInteger(idx) || idx < 0) {
+                        errors.push(`continuityFlags.resolved[${i}] must be a nonnegative integer`);
                     }
                 });
             }

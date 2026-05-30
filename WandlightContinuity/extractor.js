@@ -154,28 +154,30 @@ async function runExtractionCall(stateJson, messages) {
     let response = null;
 
     try {
-        // ── Try generateQuietPrompt (object-style, current ST API) ──────────
-        if (ctx && typeof ctx.generateQuietPrompt === 'function') {
+        // ── Primary: generateRaw (full prompt control, object-style) ────────
+        // Extraction requires both the state+message context (systemPrompt)
+        // and the extraction task instruction (userPrompt) to reach the model.
+        // generateRaw passes both fields reliably; generateQuietPrompt may not
+        // forward systemPromptOverride, so we use it only as a fallback.
+        if (ctx && typeof ctx.generateRaw === 'function') {
             if (settings.debugMode) {
-                console.log(`${LOG_PREFIX} Calling generateQuietPrompt for extraction...`);
+                console.log(`${LOG_PREFIX} Calling generateRaw for extraction...`);
             }
-            response = await ctx.generateQuietPrompt({
-                quietPrompt: userPrompt,
-                quietToLlm: false,
-                quietName: '',
-                quietImage: '',
-                forceSystemPrompt: false,
-                systemPromptOverride: systemPrompt,
-                quietModal: '',
-            });
-        }
-        // ── Fallback: generateRaw (object-style) ────────────────────────────
-        else if (ctx && typeof ctx.generateRaw === 'function') {
-            console.log(`${LOG_PREFIX} generateQuietPrompt unavailable, falling back to generateRaw`);
             response = await ctx.generateRaw({
                 systemPrompt: systemPrompt,
                 prompt: userPrompt,
                 prefill: '',
+            });
+        }
+        // ── Fallback: generateQuietPrompt with combined prompt ───────────────
+        else if (ctx && typeof ctx.generateQuietPrompt === 'function') {
+            if (settings.debugMode) {
+                console.log(`${LOG_PREFIX} generateRaw unavailable, falling back to generateQuietPrompt`);
+            }
+            // Combine system+user into quietPrompt so state context is not lost
+            const combinedPrompt = `${systemPrompt}\n\n${userPrompt}`;
+            response = await ctx.generateQuietPrompt({
+                quietPrompt: combinedPrompt,
             });
         }
         // ── Hard fallback: ctx.generate() ───────────────────────────────────

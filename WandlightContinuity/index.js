@@ -227,6 +227,14 @@ async function mountSettingsPanel(ctx) {
         if (container) {
             renderSettingsPanel(container);
             wireSettingsPanel(container);
+            // Refresh the state/memo/delta displays after wiring
+            // Use the local refreshStatePanel() directly since _wandlightRefreshUI
+            // is not yet exposed by exposeGlobalBridge() at this point.
+            try {
+                refreshStatePanel();
+            } catch (e) {
+                // Silently ignore — state panel might not exist yet
+            }
         }
     }, 100);
 

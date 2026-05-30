@@ -167,7 +167,7 @@ All new functions. No existing functions are modified or removed since this is a
 | `getDefaultState()` | `() => WandlightState` | Returns a fresh default state object with all fields initialized |
 | `applyDelta(state, delta)` | `(WandlightState, WandlightDelta) => WandlightState` | Deep-merges delta into state. Arrays are concatenated (not replaced) for knowledge. Indexed arrays (secrets, relationships, threads) use add/update/remove pattern. Returns new state object (does not mutate input) |
 | `mergeState(state, partial)` | `(WandlightState, Partial<WandlightState>) => WandlightState` | Shallow merge for direct user edits via JSON textarea |
-| `undoLastChange(state)` | `(WandlightState) => WandlightState` | Removes the last entry from `memoHistory` and reverts to the previous snapshot if available. Returns reverted state or unchanged state |
+| `undoLastChange(state)` | `(WandlightState) => { state: WandlightState, undone: boolean }` | Pops the last snapshot from `stateHistory` and restores it as the live state. Returns `{ state, undone }` — `undone: false` if no history. Incremental — one level per call. |
 | `exportState(state)` | `(WandlightState) => string` | Returns `JSON.stringify(state, null, 2)` |
 | `importState(json)` | `(string) => WandlightState` | Parses JSON, validates required fields, fills defaults for missing fields, returns state |
 | `migrateState(state)` | `(any) => WandlightState` | Checks `_version`, applies migration steps (add missing fields, rename deprecated keys), returns migrated state |

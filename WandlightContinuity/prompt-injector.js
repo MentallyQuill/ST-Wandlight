@@ -41,8 +41,13 @@ export function installInterceptor() {
  * - Cannot be async per ST's current manifest hook spec
  *
  * @param {Array} chat - Chat array (may be mutable)
+ * @param {number} contextSize - Context window size in tokens
+ * @param {AbortSignal} abort - Abort signal for cancellation
+ * @param {string} type - Generation type: 'normal', 'quiet', 'regenerate', 'impersonate', 'swipe', etc.
  */
-function wandlightContinuityInterceptor(chat) {
+function wandlightContinuityInterceptor(chat, contextSize, abort, type) {
+    // ── Skip quiet generations — injection here contaminates extraction ──────
+    if (type === 'quiet') return;
     try {
         const settings = getSettings();
 
