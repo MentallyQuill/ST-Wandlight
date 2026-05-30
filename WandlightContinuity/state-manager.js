@@ -1,6 +1,6 @@
 /**
  * state-manager.js — Wandlight Continuity
- * State CRUD, settings I/O, migration, and delta merging.
+ * State CRUD, settings I/O, migration, delta merging, snapshot history, and undo.
  * All reads reacquire from SillyTavern's context — nothing is cached.
  *
  * Imports: constants.js
@@ -18,7 +18,11 @@ import { MODULE_KEY, DEFAULT_SETTINGS, getDefaultState, SCHEMA_VERSION, LOG_PREF
  * @returns {Object} WandlightSettings
  */
 export function getSettings() {
-    const { extensionSettings } = SillyTavern.getContext();
+    const ctx = SillyTavern.getContext();
+    if (!ctx || !ctx.extensionSettings) {
+        return { ...DEFAULT_SETTINGS };
+    }
+    const { extensionSettings } = ctx;
     if (!extensionSettings[MODULE_KEY]) {
         extensionSettings[MODULE_KEY] = {};
     }
@@ -36,7 +40,9 @@ export function getSettings() {
  * @param {Object} settings - WandlightSettings to save
  */
 export function saveSettings(settings) {
-    const { extensionSettings, saveSettingsDebounced } = SillyTavern.getContext();
+    const ctx = SillyTavern.getContext();
+    if (!ctx || !ctx.extensionSettings) return;
+    const { extensionSettings, saveSettingsDebounced } = ctx;
     extensionSettings[MODULE_KEY] = settings;
     if (typeof saveSettingsDebounced === 'function') {
         saveSettingsDebounced();
@@ -52,11 +58,12 @@ export function saveSettings(settings) {
  * @returns {Object} WandlightState
  */
 export function getState() {
-    const { chatMetadata } = SillyTavern.getContext();
-    if (!chatMetadata) {
+    const ctx = SillyTavern.getContext();
+    if (!ctx || !ctx.chatMetadata) {
         console.warn(`${LOG_PREFIX} chatMetadata not available, returning default state`);
         return getDefaultState();
     }
+    const { chatMetadata } = ctx;
     let state = chatMetadata[MODULE_KEY];
     if (!state || typeof state !== 'object') {
         state = getDefaultState();
@@ -65,30 +72,25 @@ export function getState() {
     }
     // Always run migration on read
     state = migrateState(state);
-    // Ensure memoHistory is an array
-    if (!Array.isArray(state.memoHistory)) {
-        state.memoHistory = [];
-    }
-    // Ensure lastDelta is null or valid
-    if (state.lastDelta === undefined) {
-        state.lastDelta = null;
-    }
+    // Ensure arrays exist post-migration
+    if (!Array.isArray(state.memoHistory)) state.memoHistory = [];
+    if (!Array.isArray(state.stateHistory)) state.stateHistory = [];
+    if (state.lastDelta === undefined) state.lastDelta = null;
     chatMetadata[MODULE_KEY] = state;
     return state;
 }
 
 /**
- * Writes state to chatMetadata.wandlight_continuity, pushes a compact memo
- * snapshot to memoHistory if the state changed, and persists via saveMetadata().
+ * Writes state to chatMetadata.wandlight_continuity and persists via saveMetadata().
  * @param {Object} state - WandlightState to save
  */
 export function saveState(state) {
-    const { chatMetadata, saveMetadata } = SillyTavern.getContext();
-    if (!chatMetadata) {
+    const ctx = SillyTavern.getContext();
+    if (!ctx || !ctx.chatMetadata) {
         console.warn(`${LOG_PREFIX} chatMetadata not available, cannot save state`);
         return;
     }
-    // Ensure the state has a version
+    const { chatMetadata, saveMetadata } = ctx;
     if (!state._version) {
         state._version = SCHEMA_VERSION;
     }
@@ -98,24 +100,125 @@ export function saveState(state) {
     }
 }
 
+// ── Snapshot History (real state undo) ──────────────────────────────────────────
+
 /**
- * Saves state and also pushes a snapshot to memoHistory.
+ * Pushes a full state snapshot onto stateHistory before a mutation.
+ * The snapshot is stripped of its own stateHistory to avoid recursive nesting.
+ * Also strips memoHistory to keep snapshots compact.
+ *
+ * @param {Object} state - Current WandlightState (before mutation)
+ * @param {string} summary - One-line description of what change is about to occur
+ * @param {number} maxSnapshots - Max snapshots to keep (default from settings)
+ * @returns {Object} state with snapshot pushed (mutates in place)
+ */
+export function pushStateSnapshot(state, summary, maxSnapshots) {
+    if (!state || typeof state !== 'object') return state;
+    if (!Array.isArray(state.stateHistory)) state.stateHistory = [];
+
+    const max = maxSnapshots || DEFAULT_SETTINGS.maxSnapshots;
+
+    // Build a compact snapshot: full state minus the history fields themselves
+    const snapshot = {
+        timestamp: Date.now(),
+        summary: summary || 'Manual edit',
+        state: {
+            ...state,
+            stateHistory: [],    // Don't nest previous histories
+            memoHistory: [],     // Don't nest memo history
+            lastDelta: null,     // Don't nest the last delta
+        },
+    };
+
+    // Deep-clone the array sub-fields so they don't mutate when the live state changes
+    if (snapshot.state.canon && Array.isArray(snapshot.state.canon.divergences)) {
+        snapshot.state.canon = { ...snapshot.state.canon, divergences: [...snapshot.state.canon.divergences] };
+    }
+    if (snapshot.state.scene) {
+        snapshot.state.scene = {
+            ...snapshot.state.scene,
+            presentCharacters: Array.isArray(snapshot.state.scene.presentCharacters) ? [...snapshot.state.scene.presentCharacters] : [],
+            nearbyCharacters: Array.isArray(snapshot.state.scene.nearbyCharacters) ? [...snapshot.state.scene.nearbyCharacters] : [],
+        };
+    }
+    if (snapshot.state.knowledge && typeof snapshot.state.knowledge === 'object' && !Array.isArray(snapshot.state.knowledge)) {
+        const clonedKnowledge = {};
+        for (const [char, facts] of Object.entries(snapshot.state.knowledge)) {
+            clonedKnowledge[char] = Array.isArray(facts) ? [...facts] : [];
+        }
+        snapshot.state.knowledge = clonedKnowledge;
+    }
+    if (Array.isArray(snapshot.state.secrets)) snapshot.state.secrets = snapshot.state.secrets.map(s => ({ ...s }));
+    if (Array.isArray(snapshot.state.relationships)) snapshot.state.relationships = snapshot.state.relationships.map(r => ({ ...r }));
+    if (Array.isArray(snapshot.state.threads)) snapshot.state.threads = snapshot.state.threads.map(t => ({ ...t }));
+    if (Array.isArray(snapshot.state.continuityFlags)) snapshot.state.continuityFlags = snapshot.state.continuityFlags.map(f => ({ ...f }));
+
+    state.stateHistory.push(snapshot);
+
+    // Trim to max snapshots
+    if (state.stateHistory.length > max) {
+        state.stateHistory = state.stateHistory.slice(-max);
+    }
+
+    return state;
+}
+
+/**
+ * Restores the most recent state snapshot from stateHistory.
+ * The snapshot's stored state becomes the new live state, and the snapshot
+ * is removed from history (undo is destructive — one level per call).
+ * Sets lastDelta to null since the change was undone.
+ *
+ * @param {Object} state - Current WandlightState
+ * @returns {{ state: Object, undone: boolean }} New settings and whether undo occurred
+ */
+export function undoLastChange(state) {
+    if (!state || !Array.isArray(state.stateHistory) || state.stateHistory.length === 0) {
+        return { state, undone: false };
+    }
+
+    // Pop the last snapshot
+    const snapshot = state.stateHistory[state.stateHistory.length - 1];
+    if (!snapshot || !snapshot.state || typeof snapshot.state !== 'object') {
+        // Corrupt snapshot — remove it
+        state.stateHistory.pop();
+        return { state, undone: false };
+    }
+
+    // Restore the snapshot's state
+    const restoredState = { ...snapshot.state };
+
+    // Preserve the remaining stateHistory (minus the one we just used)
+    restoredState.stateHistory = state.stateHistory.slice(0, -1);
+    // Preserve memoHistory from current state if it exists (memo history is independent)
+    restoredState.memoHistory = Array.isArray(state.memoHistory) ? [...state.memoHistory] : [];
+    restoredState.lastDelta = null;
+    restoredState._version = SCHEMA_VERSION;
+
+    // Re-migrate to ensure current schema
+    return { state: migrateState(restoredState), undone: true };
+}
+
+/**
+ * Saves state and also pushes a memo snapshot to memoHistory (for display/debug).
+ * NOTE: memoHistory is separate from stateHistory. memoHistory stores memo text
+ * for inspection; stateHistory stores full state for undo.
+ *
  * @param {Object} state - WandlightState
  * @param {number} maxSnapshots - Max memo snapshots to keep
  */
 export function saveStateWithSnapshot(state, maxSnapshots) {
-    const { chatMetadata, saveMetadata } = SillyTavern.getContext();
-    if (!chatMetadata) return;
+    const ctx = SillyTavern.getContext();
+    if (!ctx || !ctx.chatMetadata) return;
+    const { chatMetadata, saveMetadata } = ctx;
     if (!state._version) state._version = SCHEMA_VERSION;
 
-    // Build compact memo snapshot for history
-    // (Imported dynamically to avoid circular dependency — resolved at call time)
+    // Build compact memo snapshot for display history
     if (typeof globalThis._wandlightBuildMemo === 'function') {
         const memo = globalThis._wandlightBuildMemo(state);
         if (memo) {
             if (!Array.isArray(state.memoHistory)) state.memoHistory = [];
             state.memoHistory.push(memo);
-            // Trim history
             const max = maxSnapshots || DEFAULT_SETTINGS.maxSnapshots;
             if (state.memoHistory.length > max) {
                 state.memoHistory = state.memoHistory.slice(-max);
@@ -176,9 +279,15 @@ export function migrateState(state) {
         if (!Array.isArray(state.threads)) state.threads = [];
         if (!Array.isArray(state.continuityFlags)) state.continuityFlags = [];
         if (!Array.isArray(state.memoHistory)) state.memoHistory = [];
+        if (!Array.isArray(state.stateHistory)) state.stateHistory = [];
         if (state.lastDelta === undefined) state.lastDelta = null;
 
         state._version = 1;
+    }
+
+    // Future migration: ensure stateHistory always exists even in v1
+    if (!Array.isArray(state.stateHistory)) {
+        state.stateHistory = [];
     }
 
     // Future migration steps would go here:
@@ -187,14 +296,210 @@ export function migrateState(state) {
     return state;
 }
 
+// ── Delta validation ────────────────────────────────────────────────────────────
+
+/** Valid enum values for validation */
+const VALID_ENUMS = {
+    tension: new Set(['low', 'medium', 'high', 'critical']),
+    trust: new Set(['low', 'medium', 'high', 'absolute']),
+    threadStatus: new Set(['active', 'dormant', 'resolved']),
+    flagType: new Set(['contradiction', 'uncertainty', 'warning']),
+    flagSeverity: new Set(['low', 'medium', 'high']),
+};
+
+/** Known top-level change keys */
+const KNOWN_CHANGE_KEYS = new Set([
+    'canon', 'scene', 'knowledge', 'secrets', 'relationships', 'threads', 'continuityFlags',
+]);
+
+/**
+ * Validates a WandlightDelta against the schema.
+ * @param {Object} delta - The delta to validate
+ * @returns {{ valid: boolean, errors: string[] }}
+ */
+export function validateDelta(delta) {
+    const errors = [];
+
+    if (!delta || typeof delta !== 'object') {
+        return { valid: false, errors: ['Delta must be an object'] };
+    }
+
+    // Empty changes is valid (no-op delta)
+    if (!delta.changes) {
+        return { valid: false, errors: ['Delta must have a "changes" key'] };
+    }
+
+    if (typeof delta.changes !== 'object' || Array.isArray(delta.changes)) {
+        return { valid: false, errors: ['Delta.changes must be an object'] };
+    }
+
+    // Accept empty changes as a valid no-op
+    if (Object.keys(delta.changes).length === 0) {
+        return { valid: true, errors: [] };
+    }
+
+    const changes = delta.changes;
+
+    // Check for unknown change keys
+    for (const key of Object.keys(changes)) {
+        if (!KNOWN_CHANGE_KEYS.has(key)) {
+            errors.push(`Unknown change key: "${key}"`);
+        }
+    }
+
+    // Validate scene sub-fields
+    if (changes.scene && typeof changes.scene === 'object') {
+        if (changes.scene.presentCharacters !== undefined && !Array.isArray(changes.scene.presentCharacters)) {
+            errors.push('scene.presentCharacters must be an array');
+        }
+        if (changes.scene.nearbyCharacters !== undefined && !Array.isArray(changes.scene.nearbyCharacters)) {
+            errors.push('scene.nearbyCharacters must be an array');
+        }
+    }
+
+    // Validate knowledge (character key -> array of strings)
+    if (changes.knowledge && typeof changes.knowledge === 'object' && !Array.isArray(changes.knowledge)) {
+        for (const [char, facts] of Object.entries(changes.knowledge)) {
+            if (!Array.isArray(facts)) {
+                errors.push(`knowledge.${char} must be an array of strings`);
+            } else {
+                for (let i = 0; i < facts.length; i++) {
+                    if (typeof facts[i] !== 'string') {
+                        errors.push(`knowledge.${char}[${i}] must be a string`);
+                    }
+                }
+            }
+        }
+    } else if (changes.knowledge !== undefined && (typeof changes.knowledge !== 'object' || Array.isArray(changes.knowledge))) {
+        errors.push('knowledge must be a character-keyed object');
+    }
+
+    // Validate secrets
+    if (changes.secrets && typeof changes.secrets === 'object') {
+        ['added', 'updated', 'removed'].forEach(op => {
+            if (changes.secrets[op] !== undefined) {
+                if (!Array.isArray(changes.secrets[op])) {
+                    errors.push(`secrets.${op} must be an array`);
+                } else if (op === 'updated') {
+                    changes.secrets.updated.forEach((upd, i) => {
+                        if (typeof upd.index !== 'number' || upd.index < 0 || !Number.isFinite(upd.index)) {
+                            errors.push(`secrets.updated[${i}].index must be a nonnegative finite integer`);
+                        }
+                    });
+                } else if (op === 'removed') {
+                    changes.secrets.removed.forEach((idx, i) => {
+                        if (typeof idx !== 'number' || idx < 0 || !Number.isFinite(idx)) {
+                            errors.push(`secrets.removed[${i}] must be a nonnegative finite integer`);
+                        }
+                    });
+                }
+            }
+        });
+    } else if (changes.secrets !== undefined) {
+        errors.push('secrets must be an object with added/updated/removed arrays');
+    }
+
+    // Validate relationships
+    if (changes.relationships && typeof changes.relationships === 'object') {
+        ['added', 'updated', 'removed'].forEach(op => {
+            if (changes.relationships[op] !== undefined) {
+                if (!Array.isArray(changes.relationships[op])) {
+                    errors.push(`relationships.${op} must be an array`);
+                } else if (op === 'added') {
+                    changes.relationships.added.forEach((rel, i) => {
+                        if (rel.tension !== undefined && !VALID_ENUMS.tension.has(rel.tension)) {
+                            errors.push(`relationships.added[${i}].tension "${rel.tension}" must be low|medium|high|critical`);
+                        }
+                        if (rel.trust !== undefined && !VALID_ENUMS.trust.has(rel.trust)) {
+                            errors.push(`relationships.added[${i}].trust "${rel.trust}" must be low|medium|high|absolute`);
+                        }
+                    });
+                } else if (op === 'updated') {
+                    changes.relationships.updated.forEach((upd, i) => {
+                        if (typeof upd.index !== 'number' || upd.index < 0 || !Number.isFinite(upd.index)) {
+                            errors.push(`relationships.updated[${i}].index must be a nonnegative finite integer`);
+                        }
+                    });
+                } else if (op === 'removed') {
+                    changes.relationships.removed.forEach((idx, i) => {
+                        if (typeof idx !== 'number' || idx < 0 || !Number.isFinite(idx)) {
+                            errors.push(`relationships.removed[${i}] must be a nonnegative finite integer`);
+                        }
+                    });
+                }
+            }
+        });
+    } else if (changes.relationships !== undefined) {
+        errors.push('relationships must be an object with added/updated/removed arrays');
+    }
+
+    // Validate threads
+    if (changes.threads && typeof changes.threads === 'object') {
+        ['added', 'updated'].forEach(op => {
+            if (changes.threads[op] !== undefined) {
+                if (!Array.isArray(changes.threads[op])) {
+                    errors.push(`threads.${op} must be an array`);
+                } else if (op === 'added') {
+                    changes.threads.added.forEach((t, i) => {
+                        if (t.status !== undefined && !VALID_ENUMS.threadStatus.has(t.status)) {
+                            errors.push(`threads.added[${i}].status "${t.status}" must be active|dormant|resolved`);
+                        }
+                    });
+                } else if (op === 'updated') {
+                    changes.threads.updated.forEach((upd, i) => {
+                        if (typeof upd.index !== 'number' || upd.index < 0 || !Number.isFinite(upd.index)) {
+                            errors.push(`threads.updated[${i}].index must be a nonnegative finite integer`);
+                        }
+                    });
+                }
+            }
+        });
+    } else if (changes.threads !== undefined) {
+        errors.push('threads must be an object with added/updated arrays');
+    }
+
+    // Validate continuityFlags
+    if (changes.continuityFlags && typeof changes.continuityFlags === 'object') {
+        if (changes.continuityFlags.added !== undefined) {
+            if (!Array.isArray(changes.continuityFlags.added)) {
+                errors.push('continuityFlags.added must be an array');
+            } else {
+                changes.continuityFlags.added.forEach((f, i) => {
+                    if (f.type !== undefined && !VALID_ENUMS.flagType.has(f.type)) {
+                        errors.push(`continuityFlags.added[${i}].type "${f.type}" must be contradiction|uncertainty|warning`);
+                    }
+                    if (f.severity !== undefined && !VALID_ENUMS.flagSeverity.has(f.severity)) {
+                        errors.push(`continuityFlags.added[${i}].severity "${f.severity}" must be low|medium|high`);
+                    }
+                });
+            }
+        }
+        if (changes.continuityFlags.resolved !== undefined) {
+            if (!Array.isArray(changes.continuityFlags.resolved)) {
+                errors.push('continuityFlags.resolved must be an array');
+            } else {
+                changes.continuityFlags.resolved.forEach((idx, i) => {
+                    if (typeof idx !== 'number' || idx < 0 || !Number.isFinite(idx)) {
+                        errors.push(`continuityFlags.resolved[${i}] must be a nonnegative finite integer`);
+                    }
+                });
+            }
+        }
+    } else if (changes.continuityFlags !== undefined) {
+        errors.push('continuityFlags must be an object with added/resolved arrays');
+    }
+
+    return { valid: errors.length === 0, errors };
+}
+
 // ── Delta application ───────────────────────────────────────────────────────────
 
 /**
- * Deep-merges a WandlightDelta into the current WandlightState.
+ * Deep-merges a validated WandlightDelta into the current WandlightState.
  * Returns a new state object — does not mutate the input.
  *
  * @param {Object} state - Current WandlightState
- * @param {Object} delta - WandlightDelta to apply
+ * @param {Object} delta - Validated WandlightDelta to apply
  * @returns {Object} New WandlightState
  */
 export function applyDelta(state, delta) {
@@ -211,6 +516,7 @@ export function applyDelta(state, delta) {
         threads: [...(state.threads || [])],
         continuityFlags: [...(state.continuityFlags || [])],
         memoHistory: [...(state.memoHistory || [])],
+        stateHistory: [...(state.stateHistory || [])],
         lastDelta: delta,
     };
 
@@ -267,7 +573,6 @@ export function applyDelta(state, delta) {
             }
         }
         if (Array.isArray(changes.secrets.removed)) {
-            // Remove from highest to lowest index to avoid shifting
             const sorted = [...changes.secrets.removed].sort((a, b) => b - a);
             for (const idx of sorted) {
                 if (idx >= 0 && idx < next.secrets.length) {
@@ -330,66 +635,25 @@ export function applyDelta(state, delta) {
     return next;
 }
 
-// ── Merge (user edits via JSON textarea) ────────────────────────────────────────
+// ── State import (validated) ────────────────────────────────────────────────────
 
 /**
- * Shallow-merge a partial state object into the full state. Used for direct
- * user edits via the JSON textarea in settings.
- * @param {Object} state - Current WandlightState
- * @param {Object} partial - Partial WandlightState from user
- * @returns {Object} Merged WandlightState
- */
-export function mergeState(state, partial) {
-    if (!partial || typeof partial !== 'object') return state;
-    return { ...state, ...partial, _version: state._version || SCHEMA_VERSION };
-}
-
-// ── Undo ────────────────────────────────────────────────────────────────────────
-
-/**
- * Removes the last entry from memoHistory and reverts to the previous snapshot.
- * Returns the reverted state, or unchanged state if no history exists.
- * @param {Object} state - Current WandlightState
- * @returns {Object} Reverted WandlightState
- */
-export function undoLastChange(state) {
-    if (!Array.isArray(state.memoHistory) || state.memoHistory.length === 0) {
-        return state;
-    }
-    const next = { ...state };
-    next.memoHistory = [...state.memoHistory];
-    next.memoHistory.pop();
-    next.lastDelta = null;
-    return next;
-}
-
-// ── Export / Import ─────────────────────────────────────────────────────────────
-
-/**
- * Serializes state to a pretty-printed JSON string.
- * @param {Object} state - WandlightState
- * @returns {string} JSON string
- */
-export function exportState(state) {
-    try {
-        return JSON.stringify(state, null, 2);
-    } catch (e) {
-        console.error(`${LOG_PREFIX} Failed to export state:`, e);
-        return '{}';
-    }
-}
-
-/**
- * Parses a JSON string, validates required fields, fills defaults for
- * missing fields, and returns a WandlightState.
- * @param {string} json - JSON string
- * @returns {Object|null} WandlightState or null on parse failure
+ * Imports state from a JSON string with validation and migration.
+ * Always merges with defaults to fill missing fields.
+ * @param {string} json - JSON string representing a WandlightState
+ * @returns {{ state: Object|null, error: string|null }}
  */
 export function importState(json) {
     try {
         const parsed = JSON.parse(json);
-        if (!parsed || typeof parsed !== 'object') return null;
-        // Merge with defaults to fill missing fields
+        if (!parsed || typeof parsed !== 'object') {
+            return { state: null, error: 'Imported JSON must be an object' };
+        }
+        if (Array.isArray(parsed)) {
+            return { state: null, error: 'Imported JSON must be an object, not an array' };
+        }
+
+        // Merge with defaults to fill missing fields safely
         const defaults = getDefaultState();
         const merged = {
             ...defaults,
@@ -403,14 +667,31 @@ export function importState(json) {
             threads: Array.isArray(parsed.threads) ? parsed.threads : [],
             continuityFlags: Array.isArray(parsed.continuityFlags) ? parsed.continuityFlags : [],
             memoHistory: Array.isArray(parsed.memoHistory) ? parsed.memoHistory : [],
+            stateHistory: Array.isArray(parsed.stateHistory) ? parsed.stateHistory : [],
             lastDelta: parsed.lastDelta || null,
             _version: SCHEMA_VERSION,
         };
+
         // Re-migrate to ensure current schema
-        return migrateState(merged);
+        const migrated = migrateState(merged);
+        return { state: migrated, error: null };
     } catch (e) {
         console.error(`${LOG_PREFIX} Failed to import state:`, e);
-        return null;
+        return { state: null, error: `JSON parse failed: ${e.message}` };
+    }
+}
+
+/**
+ * Serializes state to a pretty-printed JSON string.
+ * @param {Object} state - WandlightState
+ * @returns {string} JSON string
+ */
+export function exportState(state) {
+    try {
+        return JSON.stringify(state, null, 2);
+    } catch (e) {
+        console.error(`${LOG_PREFIX} Failed to export state:`, e);
+        return '{}';
     }
 }
 

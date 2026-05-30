@@ -12,7 +12,15 @@
  */
 
 import { LOG_PREFIX, EXTRACTION_SYSTEM_PROMPT, EXTRACTION_USER_PROMPT } from './constants.js';
-import { getSettings, getState, applyDelta, saveStateWithSnapshot } from './state-manager.js';
+import {
+    getSettings,
+    getState,
+    applyDelta,
+    saveState,
+    saveStateWithSnapshot,
+    pushStateSnapshot,
+    validateDelta,
+} from './state-manager.js';
 
 /** Guard flag to prevent concurrent extraction passes. */
 let _extractionRunning = false;
@@ -20,7 +28,7 @@ let _extractionRunning = false;
 /**
  * Collects recent narrative text from the chat array for the extraction prompt.
  * Collects from the last user turn forward (user message + all assistant replies
- * since then, until current generation end).
+ * since then, up through current generation end).
  * @param {Array} chat - The chat array from SillyTavern.getContext()
  * @returns {string} Formatted recent messages string
  */
@@ -45,7 +53,7 @@ function collectRecentMessages(chat) {
         let content = msg.mes || msg.content || '';
         if (!content.trim()) continue;
 
-        // Strip thinking/reasoning tags
+        // Strip thinking/reasoning tags so the extraction prompt is clean
         content = content.replace(/<think\b[^>]*>([\s\S]*?)<\/think>/gi, '');
         content = content.replace(/<thinking\b[^>]*>([\s\S]*?)<\/thinking>/gi, '');
         content = content.replace(/<reasoning\b[^>]*>([\s\S]*?)<\/reasoning>/gi, '');
@@ -60,15 +68,16 @@ function collectRecentMessages(chat) {
 }
 
 /**
- * Parses and validates a JSON delta string from the LLM extraction response.
+ * Parses a JSON delta string from the LLM extraction response.
  * Handles markdown fences, leading/trailing non-JSON text, and bad escapes.
+ * Then validates the parsed delta against the schema.
+ *
  * @param {string} response - Raw LLM response text
- * @returns {Object|null} Parsed WandlightDelta or null on failure
+ * @returns {Object|null} Parsed + validated WandlightDelta or null on failure
  */
 function parseDeltaResponse(response) {
     if (!response || typeof response !== 'string') return null;
 
-    // Try to extract JSON from markdown fences
     let jsonStr = response.trim();
 
     // Remove ```json fences if present
@@ -84,109 +93,169 @@ function parseDeltaResponse(response) {
         }
     }
 
+    let parsed;
     try {
-        const parsed = JSON.parse(jsonStr);
-        // Validate structure
-        if (!parsed || typeof parsed !== 'object') return null;
-        // Accept empty changes as valid (no-op delta)
-        return parsed;
+        parsed = JSON.parse(jsonStr);
     } catch (e) {
         console.warn(`${LOG_PREFIX} Failed to parse delta JSON:`, e.message);
-        console.debug(`${LOG_PREFIX} Raw response was:`, response.substring(0, 200));
+        console.debug(`${LOG_PREFIX} Raw response (first 300 chars):`, response.substring(0, 300));
         return null;
     }
+
+    // Ensure parsed has changes key — LLMs sometimes return bare objects
+    if (parsed && typeof parsed === 'object' && !parsed.changes) {
+        // If the object has known change keys at top level, wrap them
+        const knownKeys = ['canon', 'scene', 'knowledge', 'secrets', 'relationships', 'threads', 'continuityFlags'];
+        const hasChangesKey = knownKeys.some(k => k in parsed);
+        if (hasChangesKey) {
+            parsed = { summary: parsed.summary || '', changes: parsed };
+        } else if (Object.keys(parsed).length === 0) {
+            // Empty object — treat as no-op
+            parsed = { summary: 'No changes detected', changes: {} };
+        }
+    }
+
+    // Validate against the formal delta schema
+    if (!parsed.changes) {
+        console.warn(`${LOG_PREFIX} Parsed delta has no "changes" key`);
+        return null;
+    }
+
+    const { valid, errors } = validateDelta(parsed);
+    if (!valid) {
+        console.warn(`${LOG_PREFIX} Delta validation failed:`, errors.join('; '));
+        return null;
+    }
+
+    return parsed;
 }
 
 /**
  * Runs a quiet LLM call to extract continuity state changes.
  * Uses SillyTavern.generateQuietPrompt with generateRaw fallback.
  *
+ * The generateQuietPrompt signature in ST 1.12+ is:
+ *   generateQuietPrompt(prompt, quietToLlm, quietName, quietImage, forceSystemPrompt, systemPromptOverride, quietModal)
+ *
  * @param {string} stateJson - JSON string of current state
  * @param {string} messages - Recent roleplay messages text
- * @returns {Promise<Object|null>} Parsed WandlightDelta or null on failure
+ * @returns {Promise<Object|null>} Parsed + validated WandlightDelta or null on failure
  */
 async function runExtractionCall(stateJson, messages) {
-    const { generateQuietPrompt, generateRaw } = SillyTavern.getContext();
+    const ctx = SillyTavern.getContext();
+    const settings = getSettings();
 
     // Build the system prompt with state and messages interpolated
     const systemPrompt = EXTRACTION_SYSTEM_PROMPT
         .replace('{{stateJson}}', stateJson)
         .replace('{{messages}}', messages);
 
+    // Prepare the user-side prompt (what the extraction LLM sees as "the task")
+    const userPrompt = EXTRACTION_USER_PROMPT;
+
+    let response = null;
+
     try {
-        // Try generateQuietPrompt first (ST's preferred silent call API)
-        if (typeof generateQuietPrompt === 'function') {
-            const response = await generateQuietPrompt(
-                EXTRACTION_USER_PROMPT,
-                false,  // quietToLlm = false (don't forward)
-                '',     // quietName
-                '',     // quietImage
-                false,  // forceSystemPrompt = false (use what's configured)
-                systemPrompt, // systemPromptOverride — we supply our own
-                '',     // quietModal — use current model
-            );
-
-            if (response && typeof response === 'string') {
-                return parseDeltaResponse(response);
+        // ── Try generateQuietPrompt ──────────────────────────────────────────
+        if (ctx && typeof ctx.generateQuietPrompt === 'function') {
+            if (settings.debugMode) {
+                console.log(`${LOG_PREFIX} Calling generateQuietPrompt for extraction...`);
             }
+            response = await ctx.generateQuietPrompt(
+                userPrompt,       // prompt
+                false,            // quietToLlm — don't forward to main chat
+                '',               // quietName
+                '',               // quietImage
+                false,            // forceSystemPrompt
+                systemPrompt,     // systemPromptOverride
+                '',               // quietModal — use current
+            );
         }
-
-        // Fallback: generateRaw
-        if (typeof generateRaw === 'function') {
+        // ── Fallback: generateRaw ────────────────────────────────────────────
+        else if (ctx && typeof ctx.generateRaw === 'function') {
             console.log(`${LOG_PREFIX} generateQuietPrompt unavailable, falling back to generateRaw`);
-            const response = await generateRaw(
-                systemPrompt,
-                '',     // apiType
-                false,  // instruct — use raw completion
-                '',     // quietName
-                '',     // quietImage
+            // generateRaw(prompt, apiConfig, instruct, quietName, quietImage)
+            response = await ctx.generateRaw(
+                systemPrompt + '\n\n' + userPrompt,
+                '',    // apiConfig — use default
+                false, // instruct — raw completion
+                '',    // quietName
+                '',    // quietImage
             );
-            if (response && typeof response === 'string') {
-                return parseDeltaResponse(response);
-            }
         }
-
-        console.warn(`${LOG_PREFIX} No generate function available for extraction`);
-        return null;
+        // ── Hard fallback: generate() via the context ─────────────────────────
+        else if (ctx && typeof ctx.generate === 'function') {
+            console.log(`${LOG_PREFIX} Falling back to ctx.generate() for extraction`);
+            response = await ctx.generate(systemPrompt + '\n\n' + userPrompt);
+        }
+        else {
+            console.warn(`${LOG_PREFIX} No generation function available for extraction (generateQuietPrompt, generateRaw, or generate)`);
+            return null;
+        }
     } catch (e) {
         console.error(`${LOG_PREFIX} Extraction call failed:`, e);
         return null;
     }
+
+    if (!response || typeof response !== 'string') {
+        console.warn(`${LOG_PREFIX} Extraction response was empty or non-string`);
+        return null;
+    }
+
+    if (settings.debugMode) {
+        console.log(`${LOG_PREFIX} Extraction response received (${response.length} chars)`);
+    }
+
+    return parseDeltaResponse(response);
 }
 
 /**
  * Main extraction handler. Called on GENERATION_ENDED if autoExtract is enabled.
  * Collects recent messages, calls the LLM for delta extraction, validates,
- * applies the delta, and persists state.
+ * applies the delta (or stores it for manual review), and persists state.
  *
  * Guarded by _extractionRunning to prevent concurrent passes.
+ *
+ * @param {Object} [options]
+ * @param {boolean} [options.force] - If true, bypasses throttle and autoExtract check
  */
-export async function onExtractionTriggered() {
+export async function onExtractionTriggered(options = {}) {
+    const { force = false } = options;
+
     if (_extractionRunning) {
-        if (getSettings().debugMode) {
+        const settings = getSettings();
+        if (settings.debugMode) {
             console.log(`${LOG_PREFIX} Extraction already running, skipping`);
         }
         return;
     }
 
     const settings = getSettings();
-    if (!settings.enabled || !settings.autoExtract) return;
+    if (!settings.enabled) return;
+    if (!force && !settings.autoExtract) return;
 
-    // Throttle: only run every N generations
-    // Use a static counter
-    if (typeof onExtractionTriggered._counter === 'undefined') {
+    // Throttle: only run every N generations (skip if forced)
+    if (!force) {
+        if (typeof onExtractionTriggered._counter === 'undefined') {
+            onExtractionTriggered._counter = 0;
+        }
+        onExtractionTriggered._counter++;
+        const interval = settings.extractionInterval || 1;
+        if (onExtractionTriggered._counter < interval) return;
         onExtractionTriggered._counter = 0;
     }
-    onExtractionTriggered._counter++;
-    const interval = settings.extractionInterval || 1;
-    if (onExtractionTriggered._counter < interval) return;
-    onExtractionTriggered._counter = 0;
 
     _extractionRunning = true;
 
     try {
-        const { chat } = SillyTavern.getContext();
-        if (!chat || chat.length === 0) return;
+        const ctx = SillyTavern.getContext();
+        const chat = ctx && ctx.chat ? ctx.chat : null;
+        if (!chat || !Array.isArray(chat) || chat.length === 0) {
+            if (settings.debugMode) {
+                console.log(`${LOG_PREFIX} No chat messages — cannot run extraction`);
+            }
+            return;
+        }
 
         // Collect recent messages
         const messages = collectRecentMessages(chat);
@@ -197,8 +266,9 @@ export async function onExtractionTriggered() {
             return;
         }
 
-        // Get current state
+        // Get current state (reacquired from ST context)
         const state = getState();
+
         let stateJson;
         try {
             stateJson = JSON.stringify(state);
@@ -209,8 +279,7 @@ export async function onExtractionTriggered() {
 
         if (settings.debugMode) {
             console.log(`${LOG_PREFIX} Running extraction pass...`);
-            console.debug(`${LOG_PREFIX} Messages length:`, messages.length);
-            console.debug(`${LOG_PREFIX} State JSON length:`, stateJson.length);
+            console.debug(`${LOG_PREFIX} Messages length:`, messages.length, `State JSON:`, stateJson.length);
         }
 
         // Run the extraction LLM call
@@ -223,30 +292,47 @@ export async function onExtractionTriggered() {
             return;
         }
 
-        // Check for no-op delta
+        // Check for no-op delta (empty changes)
         if (!delta.changes || Object.keys(delta.changes).length === 0) {
             if (settings.debugMode) {
                 console.log(`${LOG_PREFIX} Extraction delta has no changes — skipping`);
             }
+            // Still store the no-op delta for diagnostic transparency
+            const currentState = getState();
+            currentState.lastDelta = delta;
+            saveState(currentState);
             return;
         }
 
         if (settings.debugMode) {
-            console.log(`${LOG_PREFIX} Extraction delta:`, delta.summary || '(no summary)');
-            console.debug(`${LOG_PREFIX} Delta changes:`, Object.keys(delta.changes));
+            console.log(`${LOG_PREFIX} Extraction delta valid:`, delta.summary || '(no summary)');
+            console.debug(`${LOG_PREFIX} Change keys:`, Object.keys(delta.changes));
         }
 
-        // Apply the delta
+        // ── Manual vs auto-apply branching ────────────────────────────────────
+        const currentState = getState();
+
         if (settings.autoApplyDelta) {
-            const newState = applyDelta(state, delta);
+            // Push a snapshot BEFORE applying for undo support
+            pushStateSnapshot(currentState, 'Auto-extract: ' + (delta.summary || 'unnamed change'), settings.maxSnapshots);
+
+            const newState = applyDelta(currentState, delta);
             saveStateWithSnapshot(newState, settings.maxSnapshots);
 
             if (settings.debugMode) {
-                console.log(`${LOG_PREFIX} Delta applied and state saved`);
+                console.log(`${LOG_PREFIX} Delta auto-applied and state saved`);
+            }
+        } else {
+            // Manual mode: store delta as lastDelta but don't apply
+            currentState.lastDelta = delta;
+            saveState(currentState);
+
+            if (settings.debugMode) {
+                console.log(`${LOG_PREFIX} Delta stored as lastDelta (manual review mode)`);
             }
         }
 
-        // Trigger UI refresh
+        // Trigger UI refresh if available
         if (typeof globalThis._wandlightRefreshUI === 'function') {
             globalThis._wandlightRefreshUI();
         }
@@ -258,6 +344,7 @@ export async function onExtractionTriggered() {
 }
 
 // ── Expose guard and handler on globalThis for external access ──
+
 /**
  * Returns whether extraction is currently running.
  * @returns {boolean}

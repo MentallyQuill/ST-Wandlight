@@ -1,396 +1,505 @@
 /**
  * index.js — Wandlight Continuity
- * Extension entrypoint. Wires events, installs the generate_interceptor,
- * and registers the settings panel on jQuery document ready.
+ * Extension entrypoint. Wires events, renders settings panel, registers
+ * slash commands, and exposes globalThis bridge functions.
  *
- * Imports: constants.js, state-manager.js, prompt-injector.js, extractor.js
- * Imported by: manifest.json (as "js": "index.js")
+ * Imported modules: constants.js, state-manager.js, memo-builder.js,
+ *                    prompt-injector.js, extractor.js, ui.js
  */
 
-import { LOG_PREFIX } from './constants.js';
-import { getSettings, getState, saveState } from './state-manager.js';
+import { MODULE_KEY, LOG_PREFIX, DEFAULT_SETTINGS } from './constants.js';
+import {
+    getSettings,
+    saveSettings,
+    getState,
+    saveState,
+    applyDelta,
+    pushStateSnapshot,
+    undoLastChange,
+    exportState,
+    importState,
+    validateDelta,
+} from './state-manager.js';
+import { buildMemo } from './memo-builder.js';
 import { installInterceptor } from './prompt-injector.js';
-import { onExtractionTriggered, resetExtractionCounter } from './extractor.js';
-import { wireMemoPreviewButton } from './ui.js';
+import { onExtractionTriggered, resetExtractionCounter, isExtractionRunning } from './extractor.js';
+import { renderSettingsPanel, renderStatePanel } from './ui.js';
 
-(function () {
-    const dependencies = [
-        { name: 'SillyTavern.getContext', test: () => typeof SillyTavern?.getContext === 'function' },
-        { name: 'jQuery', test: () => typeof jQuery === 'function' },
-    ];
+// ════════════════════════════════════════════════════════════════════════════════
+// jQuery ready — this is the SillyTavern extension lifecycle entrypoint.
+// SillyTavern loads all .js files in the extension folder and waits for them to
+// execute. We use jQuery's $(document).ready() which fires after the page DOM
+// is ready (including any HTML templates).
+// ════════════════════════════════════════════════════════════════════════════════
+$(document).ready(async () => {
+    'use strict';
 
-    const missing = dependencies.filter(d => !d.test());
-    if (missing.length > 0) {
-        console.error(`${LOG_PREFIX} Required API(s) unavailable: ${missing.map(d => d.name).join(', ')}. Aborting.`);
+    console.log(`${LOG_PREFIX} Wandlight Continuity extension initializing...`);
+
+    // ── Defensive API guard ──────────────────────────────────────────────────
+    if (typeof SillyTavern === 'undefined' || !SillyTavern.getContext) {
+        console.error(`${LOG_PREFIX} SillyTavern.getContext() not available. Extension cannot load.`);
         return;
     }
 
-    console.log(`${LOG_PREFIX} Wandlight Continuity initialised (v1.0.0)`);
-    const settings = getSettings();
-    if (settings.debugMode) {
-        console.log(`${LOG_PREFIX} Debug mode enabled`);
+    const ctx = SillyTavern.getContext();
+    if (!ctx) {
+        console.error(`${LOG_PREFIX} SillyTavern context returned null. Extension cannot load.`);
+        return;
     }
 
-    // ── Install generate_interceptor ─────────────────────────────────────────
+    // ── Install the generate_interceptor ─────────────────────────────────────
     installInterceptor();
 
-    // ── On jQuery document ready, register the settings panel ───────────────
-    $(document).ready(function () {
-        console.log(`${LOG_PREFIX} Document ready — registering settings panel`);
+    // ── Wire ST events ──────────────────────────────────────────────────────
+    wireEvents(ctx);
 
-        // ST's extension framework expects the settings panel to be rendered
-        // via the extension's standard settings mechanism. The settings.html
-        // content is loaded automatically by ST when the extension settings
-        // are opened. We wire up UI handlers after the settings panel is
-        // likely to be in the DOM (polling approach for robustness).
+    // ── Register slash commands ─────────────────────────────────────────────
+    registerSlashCommands(ctx);
 
-        // Attempt to wire up UI immediately, and also on a short delay
-        setTimeout(wireSettingsPanel, 100);
-    });
+    // ── Hook into settings menu ─────────────────────────────────────────────
+    hookSettingsMenu(ctx);
 
-    // ── Event: GENERATION_ENDED ─────────────────────────────────────────────
-    // Trigger extraction after each assistant generation completes.
-    SillyTavern.getContext().eventSource.on('GENERATION_ENDED', async function () {
-        const settings = getSettings();
-        if (!settings.enabled || !settings.autoExtract) return;
+    // ── Expose global bridge functions ───────────────────────────────────────
+    exposeGlobalBridge();
 
-        if (settings.debugMode) {
-            console.log(`${LOG_PREFIX} GENERATION_ENDED — triggering extraction`);
+    // ── Render state panel if state viewer is open ───────────────────────────
+    setupStatePanelTab();
+
+    console.log(`${LOG_PREFIX} Extension initialized successfully`);
+});
+
+// ════════════════════════════════════════════════════════════════════════════════
+// Event wiring
+// ════════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Wires GENERATION_ENDED and CHAT_CHANGED events.
+ * Uses ST's standard eventBus when available, falls back to event types object.
+ * @param {Object} ctx - SillyTavern.getContext() result
+ */
+function wireEvents(ctx) {
+    // Access the event bus — ST exposes it as ctx.eventBus or as window.eventBus
+    const bus = ctx.eventBus || (typeof eventBus !== 'undefined' ? eventBus : null);
+
+    if (bus && bus.on) {
+        // Listen for GENERATION_ENDED to trigger extraction
+        bus.on('GENERATION_ENDED', () => {
+            try {
+                onExtractionTriggered();
+            } catch (e) {
+                console.error(`${LOG_PREFIX} Error in GENERATION_ENDED handler:`, e);
+            }
+        });
+
+        // Listen for CHAT_CHANGED to reset extraction counter and refresh state panel
+        bus.on('CHAT_CHANGED', () => {
+            try {
+                resetExtractionCounter();
+                // Refresh state panel if visible
+                if (typeof globalThis._wandlightRefreshUI === 'function') {
+                    globalThis._wandlightRefreshUI();
+                }
+            } catch (e) {
+                console.error(`${LOG_PREFIX} Error in CHAT_CHANGED handler:`, e);
+            }
+        });
+
+        console.log(`${LOG_PREFIX} Events wired to eventBus`);
+    } else {
+        // Fallback: use the events object pattern from the reference framework
+        // Some ST versions use tavern_events parameter
+        if (ctx.eventTypes) {
+            ctx.eventTypes['GENERATION_ENDED'] = ctx.eventTypes['GENERATION_ENDED'] || [];
+            ctx.eventTypes['GENERATION_ENDED'].push(() => {
+                try { onExtractionTriggered(); } catch (e) { console.error(e); }
+            });
+            ctx.eventTypes['CHAT_CHANGED'] = ctx.eventTypes['CHAT_CHANGED'] || [];
+            ctx.eventTypes['CHAT_CHANGED'].push(() => {
+                try { resetExtractionCounter(); } catch (e) { console.error(e); }
+            });
+            console.log(`${LOG_PREFIX} Events wired via eventTypes object`);
+        } else {
+            console.warn(`${LOG_PREFIX} No event bus found. Manual extraction via slash command is still available.`);
         }
+    }
+}
 
-        try {
-            await onExtractionTriggered();
-        } catch (e) {
-            console.error(`${LOG_PREFIX} Extraction handler error:`, e);
-        }
-    });
+// ════════════════════════════════════════════════════════════════════════════════
+// Slash commands
+// ════════════════════════════════════════════════════════════════════════════════
 
-    // ── Event: CHAT_CHANGED ─────────────────────────────────────────────────
-    // Reset extraction counter and refresh UI when switching chats.
-    SillyTavern.getContext().eventSource.on('CHAT_CHANGED', function () {
-        if (getSettings().debugMode) {
-            console.log(`${LOG_PREFIX} CHAT_CHANGED — resetting extraction counter`);
-        }
-        resetExtractionCounter();
+/**
+ * Registers slash commands for manual control.
+ * @param {Object} ctx - SillyTavern.getContext() result
+ */
+function registerSlashCommands(ctx) {
+    if (!ctx.slashCommands && typeof registerSlashCommand !== 'function') {
+        console.warn(`${LOG_PREFIX} Slash command registration unavailable`);
+        return;
+    }
 
-        // Ensure new chat's state is initialized
+    // Use registerSlashCommand from global scope (ST's native API)
+    const register = typeof registerSlashCommand === 'function' ? registerSlashCommand : null;
+    if (!register) return;
+
+    // ── /wandlight-extract ───────────────────────────────────────────────────
+    register('wandlight-extract', async (args) => {
+        await onExtractionTriggered({ force: true });
+    }, undefined, '👁️ Manually run continuity state extraction', 'Wandlight');
+
+    // ── /wandlight-memo ─────────────────────────────────────────────────────
+    register('wandlight-memo', async () => {
         const state = getState();
-        saveState(state);
+        const memo = buildMemo(state);
+        if (!memo) {
+            toastr.info('No continuity state to build memo from.');
+        } else {
+            navigator.clipboard.writeText(memo).then(() => {
+                toastr.success('Continuity memo copied to clipboard');
+            }).catch(() => {
+                toastr.info(`[Wandlight Continuity State]\n${memo}`);
+            });
+        }
+    }, undefined, '📋 Copy continuity memo to clipboard', 'Wandlight');
 
-        // Refresh UI for new chat
+    // ── /wandlight-state ────────────────────────────────────────────────────
+    register('wandlight-state', async () => {
+        const state = getState();
+        const json = exportState(state);
+        navigator.clipboard.writeText(json).then(() => {
+            toastr.success('Continuity state JSON copied to clipboard');
+        }).catch(() => {
+            toastr.info(`State JSON (${json.length} chars) ready; clipboard unavailable`);
+        });
+    }, undefined, '📄 Export full continuity state as JSON', 'Wandlight');
+
+    console.log(`${LOG_PREFIX} Slash commands registered`);
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
+// Settings menu hook
+// ════════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Hooks into ST's settings menu to add a "Wandlight Continuity" entry.
+ * Renders the settings panel HTML when the user clicks the menu item.
+ * @param {Object} ctx - SillyTavern.getContext() result
+ */
+function hookSettingsMenu(ctx) {
+    // ST's settings API: addExtenionsSettings(container) or settings property
+    // We render into the #extensions_settings_area div which ST provides.
+    const container = document.getElementById('extensions_settings_area');
+    if (!container) {
+        console.warn(`${LOG_PREFIX} #extensions_settings_area not found — settings panel unavailable`);
+        return;
+    }
+
+    // Create the settings container for our extension
+    const settingsDiv = document.createElement('div');
+    settingsDiv.id = 'wandlight_continuity_settings';
+    settingsDiv.style.display = 'none';
+    container.appendChild(settingsDiv);
+
+    // Add menu item to the extensions listing
+    addSettingsMenuItem();
+
+    // Render settings HTML into the container
+    renderSettingsPanel(settingsDiv);
+
+    // Wire the settings panel interactivity after rendering
+    setTimeout(() => {
+        wireSettingsPanel(settingsDiv);
+    }, 100);
+
+    console.log(`${LOG_PREFIX} Settings panel hooked into ST`);
+}
+
+/**
+ * Adds "Wandlight Continuity" to the extensions navigation list.
+ */
+function addSettingsMenuItem() {
+    const extMenu = document.getElementById('extensions_list');
+    if (!extMenu) {
+        console.warn(`${LOG_PREFIX} #extensions_list not found — menu item unavailable`);
+        return;
+    }
+
+    const item = document.createElement('div');
+    item.className = 'list-group-item';
+    item.id = 'wandlight_continuity_menu_item';
+    item.textContent = 'Wandlight Continuity';
+    item.dataset.target = 'wandlight_continuity_settings';
+    item.style.cursor = 'pointer';
+
+    item.addEventListener('click', () => {
+        // Hide all extension settings panels
+        document.querySelectorAll('#extensions_settings_area > div').forEach(d => {
+            d.style.display = 'none';
+        });
+        // Show ours
+        const panel = document.getElementById('wandlight_continuity_settings');
+        if (panel) panel.style.display = 'block';
+
+        // Refresh state display when panel opens
         if (typeof globalThis._wandlightRefreshUI === 'function') {
             globalThis._wandlightRefreshUI();
         }
+
+        // Highlight active menu item
+        document.querySelectorAll('#extensions_list .list-group-item').forEach(el => {
+            el.classList.remove('active');
+        });
+        item.classList.add('active');
     });
 
-    // ── Slash commands ──────────────────────────────────────────────────────
-    // Register /wandlight slash command for manual extraction and status
-    SillyTavern.getContext().registerSlashCommand('wandlight', async function (args) {
-        const cmd = (args || '').trim().toLowerCase();
-        const settings = getSettings();
+    extMenu.appendChild(item);
+    console.log(`${LOG_PREFIX} Settings menu item added`);
+}
 
-        switch (cmd) {
-            case 'extract':
-            case 'run':
-                // Manually trigger extraction
-                if (settings.debugMode) {
-                    console.log(`${LOG_PREFIX} Manual extraction triggered via /wandlight`);
-                }
-                await onExtractionTriggered();
-                break;
+/**
+ * Wires the settings panel form controls (save, buttons).
+ * Called after the settings HTML is rendered into the DOM.
+ * @param {HTMLElement} container - The settings panel div
+ */
+function wireSettingsPanel(container) {
+    if (!container) return;
 
-            case 'status':
-            case 'state':
-                // Print current state to console
-                const state = getState();
-                console.log(`${LOG_PREFIX} Current continuity state:`, state);
-                break;
+    const settings = getSettings();
 
-            case 'export':
-                // Export state as JSON string
-                const exportState = getState();
-                try {
-                    const json = JSON.stringify(exportState, null, 2);
-                    console.log(`${LOG_PREFIX} Exported state:`, json);
-                    // Copy to clipboard if available
-                    if (navigator?.clipboard?.writeText) {
-                        await navigator.clipboard.writeText(json);
-                        console.log(`${LOG_PREFIX} State copied to clipboard`);
-                    }
-                } catch (e) {
-                    console.error(`${LOG_PREFIX} Export failed:`, e);
-                }
-                break;
+    // ── Toggle controls → save settings ───────────────────────────────────
+    const toggles = container.querySelectorAll('[data-setting]');
+    toggles.forEach(el => {
+        const key = el.dataset.setting;
+        if (!key) return;
 
-            case 'toggle':
-                // Toggle enabled state
-                const s = getSettings();
-                s.enabled = !s.enabled;
-                SillyTavern.getContext().extensionSettings.wandlight_continuity = s;
-                if (typeof SillyTavern.getContext().saveSettingsDebounced === 'function') {
-                    SillyTavern.getContext().saveSettingsDebounced();
-                }
-                console.log(`${LOG_PREFIX} Wandlight Continuity ${s.enabled ? 'ENABLED' : 'DISABLED'}`);
-                break;
-
-            case 'debug':
-                // Toggle debug mode
-                const ss = getSettings();
-                ss.debugMode = !ss.debugMode;
-                SillyTavern.getContext().extensionSettings.wandlight_continuity = ss;
-                if (typeof SillyTavern.getContext().saveSettingsDebounced === 'function') {
-                    SillyTavern.getContext().saveSettingsDebounced();
-                }
-                console.log(`${LOG_PREFIX} Debug mode ${ss.debugMode ? 'ON' : 'OFF'}`);
-                break;
-
-            default:
-                console.log(`${LOG_PREFIX} Available commands:`);
-                console.log('  /wandlight extract  — Manually run state extraction');
-                console.log('  /wandlight status   — Print current state to console');
-                console.log('  /wandlight export   — Export state as JSON (copies to clipboard)');
-                console.log('  /wandlight toggle   — Enable/disable the extension');
-                console.log('  /wandlight debug    — Toggle debug mode');
-                break;
+        // Set initial value from settings
+        if (el.type === 'checkbox') {
+            el.checked = !!settings[key];
+        } else if (el.type === 'number' || el.type === 'range') {
+            el.value = settings[key] !== undefined ? settings[key] : DEFAULT_SETTINGS[key];
+        } else {
+            el.value = settings[key] !== undefined ? String(settings[key]) : '';
         }
-    });
 
-    console.log(`${LOG_PREFIX} Events wired, slash command /wandlight registered`);
-
-    // ── Settings panel wiring (polling approach) ────────────────────────────
-    /**
-     * Wires up event handlers on the settings panel DOM elements.
-     * Called after document ready and on a delay to account for ST's
-     * dynamic panel rendering.
-     */
-    function wireSettingsPanel() {
-        // Check if the settings panel exists in the DOM
-        const panel = document.getElementById('wandlight_continuity_settings');
-        if (!panel) {
-            // Panel hasn't been rendered yet — try again later
-            if (getSettings().debugMode) {
-                console.log(`${LOG_PREFIX} Settings panel not yet in DOM, deferring wiring`);
+        // Wire change handler
+        el.addEventListener('change', () => {
+            const currentSettings = getSettings();
+            if (el.type === 'checkbox') {
+                currentSettings[key] = el.checked;
+            } else if (el.type === 'number' || el.type === 'range') {
+                currentSettings[key] = Number(el.value);
+            } else {
+                currentSettings[key] = el.value;
             }
-            setTimeout(wireSettingsPanel, 500);
-            return;
-        }
+            saveSettings(currentSettings);
+            if (currentSettings.debugMode) {
+                console.log(`${LOG_PREFIX} Setting "${key}" →`, currentSettings[key]);
+            }
+        });
+    });
 
-        if (getSettings().debugMode) {
-            console.log(`${LOG_PREFIX} Wiring settings panel handlers`);
-        }
+    // ── "Extract Now" button ──────────────────────────────────────────────
+    const extractBtn = container.querySelector('#wandlight_extract_now');
+    if (extractBtn) {
+        extractBtn.addEventListener('click', async () => {
+            extractBtn.disabled = true;
+            extractBtn.textContent = 'Extracting...';
+            try {
+                await onExtractionTriggered({ force: true });
+            } finally {
+                extractBtn.disabled = false;
+                extractBtn.textContent = 'Extract Now';
+            }
+        });
+    }
 
-        // Enable/disable checkbox
-        const enabledCheckbox = document.getElementById('wandlight_enabled');
-        if (enabledCheckbox) {
-            enabledCheckbox.checked = getSettings().enabled;
-            enabledCheckbox.addEventListener('change', function () {
-                const s = getSettings();
-                s.enabled = this.checked;
-                saveSettingsToStore(s);
-                if (s.debugMode) {
-                    console.log(`${LOG_PREFIX} Enabled: ${s.enabled}`);
-                }
-            });
-        }
-
-        // Inject Memo checkbox
-        const injectMemoCheckbox = document.getElementById('wandlight_inject_memo');
-        if (injectMemoCheckbox) {
-            injectMemoCheckbox.checked = getSettings().injectMemo;
-            injectMemoCheckbox.addEventListener('change', function () {
-                const s = getSettings();
-                s.injectMemo = this.checked;
-                saveSettingsToStore(s);
-            });
-        }
-
-        // Auto Extract checkbox
-        const autoExtractCheckbox = document.getElementById('wandlight_auto_extract');
-        if (autoExtractCheckbox) {
-            autoExtractCheckbox.checked = getSettings().autoExtract;
-            autoExtractCheckbox.addEventListener('change', function () {
-                const s = getSettings();
-                s.autoExtract = this.checked;
-                saveSettingsToStore(s);
-            });
-        }
-
-        // Auto Apply Delta checkbox
-        const autoApplyCheckbox = document.getElementById('wandlight_auto_apply');
-        if (autoApplyCheckbox) {
-            autoApplyCheckbox.checked = getSettings().autoApplyDelta;
-            autoApplyCheckbox.addEventListener('change', function () {
-                const s = getSettings();
-                s.autoApplyDelta = this.checked;
-                saveSettingsToStore(s);
-            });
-        }
-
-        // Extraction Interval slider/number
-        const intervalInput = document.getElementById('wandlight_extraction_interval');
-        const intervalValue = document.getElementById('wandlight_extraction_interval_value');
-        if (intervalInput && intervalValue) {
-            const currentInterval = getSettings().extractionInterval || 1;
-            intervalInput.value = currentInterval;
-            intervalValue.textContent = currentInterval;
-            intervalInput.addEventListener('input', function () {
-                const val = parseInt(this.value, 10) || 1;
-                intervalValue.textContent = val;
-                const s = getSettings();
-                s.extractionInterval = val;
-                saveSettingsToStoreDebounced(s);
-            });
-        }
-
-        // Max Snapshots slider/number
-        const snapshotsInput = document.getElementById('wandlight_max_snapshots');
-        const snapshotsValue = document.getElementById('wandlight_max_snapshots_value');
-        if (snapshotsInput && snapshotsValue) {
-            const currentSnapshots = getSettings().maxSnapshots || 20;
-            snapshotsInput.value = currentSnapshots;
-            snapshotsValue.textContent = currentSnapshots;
-            snapshotsInput.addEventListener('input', function () {
-                const val = parseInt(this.value, 10) || 20;
-                snapshotsValue.textContent = val;
-                const s = getSettings();
-                s.maxSnapshots = val;
-                saveSettingsToStoreDebounced(s);
-            });
-        }
-
-        // Debug Mode checkbox
-        const debugCheckbox = document.getElementById('wandlight_debug_mode');
-        if (debugCheckbox) {
-            debugCheckbox.checked = getSettings().debugMode || false;
-            debugCheckbox.addEventListener('change', function () {
-                const s = getSettings();
-                s.debugMode = this.checked;
-                saveSettingsToStore(s);
-            });
-        }
-
-        // State JSON textarea
-        const stateJsonTextarea = document.getElementById('wandlight_state_json');
-        const refreshStateBtn = document.getElementById('wandlight_refresh_state');
-        const saveStateBtn = document.getElementById('wandlight_save_state');
-        const importStateBtn = document.getElementById('wandlight_import_state');
-        const exportStateBtn = document.getElementById('wandlight_export_state');
-
-        // Refresh button — reload JSON from live state
-        if (refreshStateBtn && stateJsonTextarea) {
-            refreshStateBtn.addEventListener('click', function () {
-                const state = getState();
-                stateJsonTextarea.value = JSON.stringify(state, null, 2);
-            });
-        }
-
-        // Save button — parse JSON and merge into state
-        if (saveStateBtn && stateJsonTextarea) {
-            saveStateBtn.addEventListener('click', function () {
-                try {
-                    const parsed = JSON.parse(stateJsonTextarea.value);
-                    if (parsed && typeof parsed === 'object') {
-                        const current = getState();
-                        // Deep merge the parsed into current
-                        const merged = { ...current, ...parsed };
-                        saveState(merged);
-                        if (typeof globalThis._wandlightRefreshUI === 'function') {
-                            globalThis._wandlightRefreshUI();
-                        }
-                        if (getSettings().debugMode) {
-                            console.log(`${LOG_PREFIX} State manually saved from settings panel`);
-                        }
-                    }
-                } catch (e) {
-                    console.error(`${LOG_PREFIX} Invalid JSON in state editor:`, e);
-                    alert('Invalid JSON. Check console for details.');
-                }
-            });
-        }
-
-        // Import button — file import
-        if (importStateBtn && stateJsonTextarea) {
-            importStateBtn.addEventListener('click', function () {
-                const input = document.createElement('input');
-                input.type = 'file';
-                input.accept = '.json';
-                input.addEventListener('change', function () {
-                    const file = this.files[0];
-                    if (!file) return;
-                    const reader = new FileReader();
-                    reader.onload = function () {
-                        try {
-                            const parsed = JSON.parse(reader.result);
-                            if (parsed && typeof parsed === 'object') {
-                                const current = getState();
-                                const merged = { ...current, ...parsed };
-                                saveState(merged);
-                                stateJsonTextarea.value = JSON.stringify(merged, null, 2);
-                                if (typeof globalThis._wandlightRefreshUI === 'function') {
-                                    globalThis._wandlightRefreshUI();
-                                }
-                            }
-                        } catch (e) {
-                            console.error(`${LOG_PREFIX} Import failed:`, e);
-                            alert('Failed to import state. Check console for details.');
-                        }
-                    };
-                    reader.readAsText(file);
-                });
-                input.click();
-            });
-        }
-
-        // Export button — download state as JSON file
-        if (exportStateBtn) {
-            exportStateBtn.addEventListener('click', function () {
-                const state = getState();
-                const json = JSON.stringify(state, null, 2);
-                const blob = new Blob([json], { type: 'application/json' });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = 'wandlight_state_' + new Date().toISOString().replace(/[:.]/g, '-') + '.json';
-                a.click();
-                URL.revokeObjectURL(url);
-            });
-        }
-
-        // Initialize state textarea with current state
-        if (stateJsonTextarea && !stateJsonTextarea.value) {
+    // ── "Apply Last Delta" button ─────────────────────────────────────────
+    const applyDeltaBtn = container.querySelector('#wandlight_apply_delta');
+    if (applyDeltaBtn) {
+        applyDeltaBtn.addEventListener('click', () => {
             const state = getState();
-            stateJsonTextarea.value = JSON.stringify(state, null, 2);
-        }
-
-        // ── Wire the memo preview refresh button ────────────────────────────
-        wireMemoPreviewButton();
-    }
-
-    /**
-     * Saves settings to extension store and persists immediately.
-     * @param {Object} s - Settings object
-     */
-    function saveSettingsToStore(s) {
-        SillyTavern.getContext().extensionSettings.wandlight_continuity = s;
-        if (typeof SillyTavern.getContext().saveSettingsDebounced === 'function') {
-            SillyTavern.getContext().saveSettingsDebounced();
-        }
-    }
-
-    /** Debounce timer for settings saving. */
-    let _saveTimeout = null;
-
-    /**
-     * Debounced settings save — for slider inputs.
-     * @param {Object} s - Settings object
-     */
-    function saveSettingsToStoreDebounced(s) {
-        SillyTavern.getContext().extensionSettings.wandlight_continuity = s;
-        if (_saveTimeout) clearTimeout(_saveTimeout);
-        _saveTimeout = setTimeout(() => {
-            if (typeof SillyTavern.getContext().saveSettingsDebounced === 'function') {
-                SillyTavern.getContext().saveSettingsDebounced();
+            if (!state.lastDelta) {
+                if (typeof toastr !== 'undefined') toastr.warning('No pending delta to apply');
+                return;
             }
-        }, 300);
+            pushStateSnapshot(state, 'Manual delta apply: ' + (state.lastDelta.summary || 'unnamed'), settings.maxSnapshots);
+            const newState = applyDelta(state, state.lastDelta);
+            newState.lastDelta = null;
+            saveState(newState);
+            if (typeof toastr !== 'undefined') toastr.success('Delta applied');
+            if (typeof globalThis._wandlightRefreshUI === 'function') {
+                globalThis._wandlightRefreshUI();
+            }
+        });
     }
-})();
+
+    // ── "Dismiss Delta" button ────────────────────────────────────────────
+    const dismissBtn = container.querySelector('#wandlight_dismiss_delta');
+    if (dismissBtn) {
+        dismissBtn.addEventListener('click', () => {
+            const state = getState();
+            state.lastDelta = null;
+            saveState(state);
+            if (typeof toastr !== 'undefined') toastr.info('Delta dismissed');
+            if (typeof globalThis._wandlightRefreshUI === 'function') {
+                globalThis._wandlightRefreshUI();
+            }
+        });
+    }
+
+    // ── "Undo Last Change" button ─────────────────────────────────────────
+    const undoBtn = container.querySelector('#wandlight_undo_change');
+    if (undoBtn) {
+        undoBtn.addEventListener('click', () => {
+            const state = getState();
+            const { state: restoredState, undone } = undoLastChange(state);
+            if (undone) {
+                saveState(restoredState);
+                if (typeof toastr !== 'undefined') toastr.success('Last change undone');
+                if (typeof globalThis._wandlightRefreshUI === 'function') {
+                    globalThis._wandlightRefreshUI();
+                }
+            } else {
+                if (typeof toastr !== 'undefined') toastr.info('No changes to undo');
+            }
+        });
+    }
+
+    // ── "Export State" button ─────────────────────────────────────────────
+    const exportBtn = container.querySelector('#wandlight_export_state');
+    if (exportBtn) {
+        exportBtn.addEventListener('click', () => {
+            const state = getState();
+            const json = exportState(state);
+            const blob = new Blob([json], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `wandlight_state_${Date.now()}.json`;
+            a.click();
+            URL.revokeObjectURL(url);
+            if (typeof toastr !== 'undefined') toastr.success('State exported');
+        });
+    }
+
+    // ── "Import State" button ─────────────────────────────────────────────
+    const importBtn = container.querySelector('#wandlight_import_state');
+    if (importBtn) {
+        importBtn.addEventListener('click', () => {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = '.json';
+            input.onchange = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (re) => {
+                    const { state, error } = importState(re.target.result);
+                    if (error) {
+                        if (typeof toastr !== 'undefined') toastr.error('Import failed: ' + error);
+                        return;
+                    }
+                    saveState(state);
+                    if (typeof toastr !== 'undefined') toastr.success('State imported successfully');
+                    if (typeof globalThis._wandlightRefreshUI === 'function') {
+                        globalThis._wandlightRefreshUI();
+                    }
+                };
+                reader.readAsText(file);
+            };
+            input.click();
+        });
+    }
+
+    // ── "Reset State" button ──────────────────────────────────────────────
+    const resetBtn = container.querySelector('#wandlight_reset_state');
+    if (resetBtn) {
+        resetBtn.addEventListener('click', () => {
+            if (typeof toastr !== 'undefined' && !confirm('Reset all continuity state? This cannot be undone.')) {
+                return;
+            }
+            const { getDefaultState } = require('./constants.js');
+            const fresh = getDefaultState();
+            saveState(fresh);
+            if (typeof toastr !== 'undefined') toastr.success('State reset to defaults');
+            if (typeof globalThis._wandlightRefreshUI === 'function') {
+                globalThis._wandlightRefreshUI();
+            }
+        });
+    }
+
+    console.log(`${LOG_PREFIX} Settings panel wired`);
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
+// Global bridge (expose functions for cross-module and external access)
+// ════════════════════════════════════════════════════════════════════════════════
+
+function exposeGlobalBridge() {
+    globalThis._wandlightBuildMemo = buildMemo;
+    globalThis._wandlightRefreshUI = refreshStatePanel;
+    globalThis._wandlightGetState = getState;
+    globalThis._wandlightValidateDelta = validateDelta;
+    console.log(`${LOG_PREFIX} Global bridge exposed: _wandlightBuildMemo, _wandlightRefreshUI, _wandlightGetState, _wandlightValidateDelta`);
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
+// State panel rendering
+// ════════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Sets up a tab or panel area for the state viewer within the settings panel.
+ */
+function setupStatePanelTab() {
+    // The state panel is rendered within the settings HTML by ui.js.
+    // This function sets up periodic refresh when the panel is visible.
+    console.log(`${LOG_PREFIX} State panel tab ready`);
+}
+
+/**
+ * Refreshes the state display panel. Called from buttons, events, and
+ * via globalThis._wandlightRefreshUI().
+ */
+function refreshStatePanel() {
+    const container = document.getElementById('wandlight_state_display');
+    if (!container) return;
+
+    const state = getState();
+    if (!state) {
+        container.innerHTML = '<em>No continuity state loaded</em>';
+        return;
+    }
+
+    renderStatePanel(container, state);
+
+    // Also update the Last Delta preview area
+    const deltaContainer = document.getElementById('wandlight_delta_preview');
+    if (deltaContainer) {
+        if (state.lastDelta) {
+            const summary = state.lastDelta.summary || '(no summary)';
+            const changeKeys = Object.keys(state.lastDelta.changes || {});
+            deltaContainer.innerHTML = [
+                `<strong>Pending Delta:</strong> ${escapeHtml(summary)}`,
+                `<div class="wandlight-delta-changes">Keys: ${changeKeys.length ? changeKeys.map(escapeHtml).join(', ') : '(none)'}</div>`,
+                `<pre class="wandlight-delta-json">${escapeHtml(JSON.stringify(state.lastDelta, null, 2))}</pre>`,
+            ].join('');
+        } else {
+            deltaContainer.innerHTML = '<em>No pending delta</em>';
+        }
+    }
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
+// Utilities
+// ════════════════════════════════════════════════════════════════════════════════
+
+function escapeHtml(str) {
+    if (!str) return '';
+    return String(str)
+        .replace(/&/g, '&')
+        .replace(/</g, '<')
+        .replace(/>/g, '>')
+        .replace(/"/g, '"')
+        .replace(/'/g, '&#039;');
+}

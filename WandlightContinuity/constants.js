@@ -47,6 +47,7 @@ export function getDefaultState() {
         threads: [],
         continuityFlags: [],
         memoHistory: [],
+        stateHistory: [],
         lastDelta: null,
         _version: SCHEMA_VERSION,
     };

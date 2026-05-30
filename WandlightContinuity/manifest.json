@@ -2,6 +2,7 @@
     "display_name": "Wandlight Continuity",
     "version": "1.0.0",
     "author": "MentallyQuill",
+    "key": "wandlight_continuity",
     "js": "index.js",
     "css": "style.css",
     "loading_order": 21,

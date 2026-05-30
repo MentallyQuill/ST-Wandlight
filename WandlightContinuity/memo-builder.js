@@ -75,55 +75,79 @@ export function buildMemo(state) {
         hasContent = true;
     }
 
-    // ── Character Knowledge (condensed) ──
+    // ── Character Knowledge (condensed to present characters only) ──
     if (state.knowledge && Object.keys(state.knowledge).length > 0) {
-        lines.push('');
-        lines.push('## Character Knowledge');
+        const presentChars = state.scene?.presentCharacters || [];
+        const presentSet = new Set(presentChars.map(c => c.toLowerCase()));
+        const relevantKnowledge = {};
         for (const [char, facts] of Object.entries(state.knowledge)) {
-            if (!Array.isArray(facts) || facts.length === 0) continue;
-            const truncated = facts.slice(0, MAX_KNOWLEDGE_FACTS_PER_CHAR);
-            const suffix = facts.length > MAX_KNOWLEDGE_FACTS_PER_CHAR
-                ? ` (+${facts.length - MAX_KNOWLEDGE_FACTS_PER_CHAR} more)` : '';
-            lines.push(`${char}: ${truncated.join('; ')}${suffix}`);
+            // Only include knowledge for characters who are present in the scene
+            if (presentSet.has(char.toLowerCase())) {
+                relevantKnowledge[char] = facts;
+            }
         }
-        hasContent = true;
+        if (Object.keys(relevantKnowledge).length > 0) {
+            lines.push('');
+            lines.push('## Character Knowledge');
+            for (const [char, facts] of Object.entries(relevantKnowledge)) {
+                if (!Array.isArray(facts) || facts.length === 0) continue;
+                const truncated = facts.slice(0, MAX_KNOWLEDGE_FACTS_PER_CHAR);
+                const suffix = facts.length > MAX_KNOWLEDGE_FACTS_PER_CHAR
+                    ? ` (+${facts.length - MAX_KNOWLEDGE_FACTS_PER_CHAR} more)` : '';
+                lines.push(`${char}: ${truncated.join('; ')}${suffix}`);
+            }
+            hasContent = true;
+        }
     }
 
-    // ── Secrets ──
+    // ── Secrets (filter to non-public only) ──
     if (state.secrets?.length > 0) {
-        lines.push('');
-        lines.push('## Secrets');
-        for (const s of state.secrets) {
-            const parts = [`- ${s.fact}`];
-            if (s.trueState) parts.push(`(Truth: ${s.trueState})`);
-            if (s.publicVersion) parts.push(`(Public: ${s.publicVersion})`);
-            if (s.whoKnows?.length > 0) parts.push(`[Known by: ${s.whoKnows.join(', ')}]`);
-            lines.push(parts.join(' '));
+        const nonPublicSecrets = state.secrets.filter(s => {
+            // Consider "non-public" if whoKnows does NOT include "everyone" or "all"
+            if (!s.whoKnows || s.whoKnows.length === 0) return true; // unknown audience = non-public
+            const whoLower = s.whoKnows.map(w => w.toLowerCase());
+            return !whoLower.includes('everyone') && !whoLower.includes('all') && !whoLower.includes('public');
+        });
+        if (nonPublicSecrets.length > 0) {
+            lines.push('');
+            lines.push('## Secrets');
+            for (const s of nonPublicSecrets) {
+                const parts = [`- ${s.fact}`];
+                if (s.trueState) parts.push(`(Truth: ${s.trueState})`);
+                if (s.publicVersion) parts.push(`(Public: ${s.publicVersion})`);
+                if (s.whoKnows?.length > 0) parts.push(`[Known by: ${s.whoKnows.join(', ')}]`);
+                lines.push(parts.join(' '));
+            }
+            hasContent = true;
         }
-        hasContent = true;
     }
 
-    // ── Relationships (condensed) ──
+    // ── Relationships (filter to medium+ tension only) ──
     if (state.relationships?.length > 0) {
-        lines.push('');
-        lines.push('## Relationships');
-        const rels = state.relationships.slice(0, MAX_RELATIONSHIPS_IN_MEMO);
-        for (const r of rels) {
-            const parts = [`- ${r.pair}`];
-            if (r.notes) parts.push(`: ${r.notes}`);
-            if (r.tension) parts.push(`[Tension: ${r.tension}]`);
-            if (r.trust) parts.push(`[Trust: ${r.trust}]`);
-            lines.push(parts.join(' '));
+        const tenseRels = state.relationships.filter(r =>
+            r.tension === 'high' || r.tension === 'critical' || r.tension === 'medium'
+        );
+        if (tenseRels.length > 0) {
+            lines.push('');
+            lines.push('## Relationships');
+            const rels = tenseRels.slice(0, MAX_RELATIONSHIPS_IN_MEMO);
+            for (const r of rels) {
+                const parts = [`- ${r.pair}`];
+                if (r.notes) parts.push(`: ${r.notes}`);
+                if (r.tension) parts.push(`[Tension: ${r.tension}]`);
+                if (r.trust) parts.push(`[Trust: ${r.trust}]`);
+                lines.push(parts.join(' '));
+            }
+            if (tenseRels.length > MAX_RELATIONSHIPS_IN_MEMO) {
+                lines.push(`  (+${tenseRels.length - MAX_RELATIONSHIPS_IN_MEMO} more)`);
+            }
+            hasContent = true;
         }
-        if (state.relationships.length > MAX_RELATIONSHIPS_IN_MEMO) {
-            lines.push(`  (+${state.relationships.length - MAX_RELATIONSHIPS_IN_MEMO} more)`);
-        }
-        hasContent = true;
     }
 
-    // ── Active Threads (condensed) ──
+    // ── Active Threads (active status only) ──
     if (state.threads?.length > 0) {
-        const activeThreads = state.threads.filter(t => t.status !== 'resolved');
+        const activeThreads = state.threads.filter(t => t.status === 'active');
         if (activeThreads.length > 0) {
             lines.push('');
             lines.push('## Active Story Threads');
@@ -159,7 +183,7 @@ export function buildMemo(state) {
 
     if (!hasContent) return '';
 
-    return '[CONTINUITY MEMO]\n' + lines.join('\n');
+    return '[WANDLIGHT CONTINUITY STATE]\n' + lines.join('\n') + '\n[/WANDLIGHT CONTINUITY STATE]';
 }
 
 // ── Expose on globalThis for dynamic access from state-manager (saveStateWithSnapshot) ──
