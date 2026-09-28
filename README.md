@@ -62,6 +62,7 @@ Enable or disable modules in SillyTavern's Prompt Manager. Only one module per g
 | **Timestamp** | ON | Opens each response with date, time, location, and weather. Key for knowledge tracking features. |
 | **Journey Integrity** | OFF | Real-time pacing. No fast-travelling through the castle. |
 | **Realism Mode** | OFF | Social friction. Skepticism, self-interest, guardedness. Vulnerability costs something. |
+| **Introspective Fragments** | OFF | Rare, psychologically grounded flashes of memory, desire, or fear under emotional pressure. |
 | **Length: Flexible** | ON | Matches length to scene energy — quiet moments are brief, dramatic ones expand. |
 | **Length: Short** | OFF | 3–5 paragraphs. |
 | **Length: Medium** | OFF | 5–10 paragraphs. |
